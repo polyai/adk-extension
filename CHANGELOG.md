@@ -1,3 +1,9 @@
+## [1.1.1](https://github.com/polyai/adk-extension/compare/v1.1.0...v1.1.1) (2026-03-10)
+
+### Bug Fixes
+
+* update gh plugin ([#10](https://github.com/polyai/adk-extension/issues/10)) ([71a0149](https://github.com/polyai/adk-extension/commit/71a01499c3809a3e745ff238185514c6fbec34c8))
+
 ## [1.1.0](https://github.com/polyai/adk-extension/compare/v1.0.1...v1.1.0) (2026-03-10)
 
 ### Features
