@@ -6,7 +6,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript)](https://www.typescriptlang.org/)
 
-A Visual Studio Code extension for [Agent Deployment Kit](https://github.com/PolyAI-LDN/adk-extension) projects. Visualize ADK flow directories as interactive graphs, edit flow steps, functions, and transitions with an intuitive visual interface.
+A Visual Studio Code extension for [Agent Deployment Kit](https://github.com/polyai/adk-extension) projects. Visualize ADK flow directories as interactive graphs, edit flow steps, functions, and transitions with an intuitive visual interface.
 
 ## Prerequisites
 
@@ -14,7 +14,7 @@ You must have access to a workspace in PolyAI Agent Studio before using this ext
 
 ## Installation
 
-Download the latest `adk-extension-*.vsix` file from the [GitHub Releases](https://github.com/PolyAI-LDN/adk-extension/releases) page.
+Download the latest `adk-extension-*.vsix` file from the [GitHub Releases](https://github.com/polyai/adk-extension/releases) page.
 
 **For VS Code / Cursor:**
 
@@ -142,7 +142,7 @@ Set the following environment variables to enable JIRA integration:
 ### Getting Started
 
 ```bash
-git clone https://github.com/PolyAI-LDN/adk-extension.git
+git clone https://github.com/polyai/adk-extension.git
 cd adk-extension
 yarn install
 yarn compile
@@ -170,7 +170,7 @@ src/
 
 ## Bugs & Feature Requests
 
-Please report bugs or request features via the [GitHub Issues](https://github.com/PolyAI-LDN/adk-extension/issues) page.
+Please report bugs or request features via the [GitHub Issues](https://github.com/polyai/adk-extension/issues) page.
 
 ## Contributing
 

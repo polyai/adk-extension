@@ -8,7 +8,7 @@
   "icon": "icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/PolyAI-LDN/adk-extension.git"
+    "url": "https://github.com/polyai/adk-extension.git"
   },
   "bin": {
     "adk-lint": "./dist/adk-lint.js"
