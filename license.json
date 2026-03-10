@@ -1,0 +1,80 @@
+{
+  "js-yaml@4.1.0": {
+    "licenses": "MIT",
+    "repository": "https://github.com/nodeca/js-yaml",
+    "path": "node_modules/js-yaml",
+    "licenseFile": "node_modules/js-yaml/LICENSE"
+  },
+  "@types/js-yaml@4.0.9": {
+    "licenses": "MIT",
+    "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+    "path": "node_modules/@types/js-yaml",
+    "licenseFile": "node_modules/@types/js-yaml/LICENSE"
+  },
+  "@types/mocha@10.0.10": {
+    "licenses": "MIT",
+    "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+    "path": "node_modules/@types/mocha",
+    "licenseFile": "node_modules/@types/mocha/LICENSE"
+  },
+  "@types/node@22.x": {
+    "licenses": "MIT",
+    "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+    "path": "node_modules/@types/node",
+    "licenseFile": "node_modules/@types/node/LICENSE"
+  },
+  "@types/vscode@1.105.1": {
+    "licenses": "MIT",
+    "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+    "path": "node_modules/@types/vscode",
+    "licenseFile": "node_modules/@types/vscode/LICENSE"
+  },
+  "@vscode/test-cli@0.0.12": {
+    "licenses": "MIT",
+    "repository": "https://github.com/microsoft/vscode-test-cli",
+    "path": "node_modules/@vscode/test-cli",
+    "licenseFile": "node_modules/@vscode/test-cli/LICENSE"
+  },
+  "@vscode/test-electron@2.5.2": {
+    "licenses": "MIT",
+    "repository": "https://github.com/microsoft/vscode-test",
+    "path": "node_modules/@vscode/test-electron",
+    "licenseFile": "node_modules/@vscode/test-electron/LICENSE"
+  },
+  "eslint@9.39.1": {
+    "licenses": "MIT",
+    "repository": "https://github.com/eslint/eslint",
+    "path": "node_modules/eslint",
+    "licenseFile": "node_modules/eslint/LICENSE"
+  },
+  "ts-loader@9.5.4": {
+    "licenses": "MIT",
+    "repository": "https://github.com/TypeStrong/ts-loader",
+    "path": "node_modules/ts-loader",
+    "licenseFile": "node_modules/ts-loader/LICENSE"
+  },
+  "typescript@5.9.3": {
+    "licenses": "Apache-2.0",
+    "repository": "https://github.com/microsoft/TypeScript",
+    "path": "node_modules/typescript",
+    "licenseFile": "node_modules/typescript/LICENSE.txt"
+  },
+  "typescript-eslint@8.48.1": {
+    "licenses": "MIT",
+    "repository": "https://github.com/typescript-eslint/typescript-eslint",
+    "path": "node_modules/typescript-eslint",
+    "licenseFile": "node_modules/typescript-eslint/LICENSE"
+  },
+  "webpack@5.103.0": {
+    "licenses": "MIT",
+    "repository": "https://github.com/webpack/webpack",
+    "path": "node_modules/webpack",
+    "licenseFile": "node_modules/webpack/LICENSE"
+  },
+  "webpack-cli@6.0.1": {
+    "licenses": "MIT",
+    "repository": "https://github.com/webpack/webpack-cli",
+    "path": "node_modules/webpack-cli",
+    "licenseFile": "node_modules/webpack-cli/LICENSE"
+  }
+}

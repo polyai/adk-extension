@@ -1,0 +1,118 @@
+{
+  "name": "adk-extension",
+  "displayName": "Agent Development Kit Extension",
+  "description": "Extension for the Agent Development Kit. Contains useful commands and tools for agent development.",
+  "version": "1.0.0",
+  "publisher": "PolyAI",
+  "license": "Apache-2.0",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/polyai/adk-extension.git"
+  },
+  "bin": {
+    "adk-lint": "./dist/adk-lint.js"
+  },
+  "engines": {
+    "vscode": "^1.105.1",
+    "node": ">=16.0.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "adk-extension.viewFlow",
+        "title": "ADK: View Flow",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "adk-extension.toggleDebugMode",
+        "title": "ADK: Toggle Debug Mode",
+        "icon": "$(debug)"
+      },
+      {
+        "command": "adk-extension.createJiraTicket",
+        "title": "ADK: Create JIRA Ticket from Branch",
+        "icon": "$(issue-opened)"
+      },
+      {
+        "command": "adk-extension.clearJiraMappings",
+        "title": "ADK: Clear JIRA Project Mappings",
+        "icon": "$(clear-all)"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "adk-extension.viewFlow",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation",
+          "icon": "$(graph)"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "adk-extension.viewFlow",
+          "title": "ADK: View Flow",
+          "category": "Agent Development Kit Extension"
+        },
+        {
+          "command": "adk-extension.toggleDebugMode",
+          "title": "ADK: Toggle Debug Mode",
+          "category": "Agent Development Kit Extension"
+        },
+        {
+          "command": "adk-extension.createJiraTicket",
+          "title": "ADK: Create JIRA Ticket from Branch",
+          "category": "Agent Development Kit Extension"
+        },
+        {
+          "command": "adk-extension.clearJiraMappings",
+          "title": "ADK: Clear JIRA Project Mappings",
+          "category": "Agent Development Kit Extension"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "yarn run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "yarn run compile-tests && yarn run compile && yarn run lint",
+    "lint": "eslint src",
+    "test": "vscode-test",
+    "semantic-release": "semantic-release"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/exec": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@types/js-yaml": "^4.0.9",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.105.1",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "conventional-changelog-conventionalcommits": "^8.0.0",
+    "eslint": "^9.39.1",
+    "semantic-release": "^24.0.0",
+    "semantic-release-vsce": "^6.1.0",
+    "ts-loader": "^9.5.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.48.1",
+    "webpack": "^5.103.0",
+    "webpack-cli": "^6.0.1"
+  }
+}
