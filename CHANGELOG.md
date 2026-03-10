@@ -1,3 +1,9 @@
+## [1.1.0](https://github.com/polyai/adk-extension/compare/v1.0.1...v1.1.0) (2026-03-10)
+
+### Features
+
+* update vsce release ([#9](https://github.com/polyai/adk-extension/issues/9)) ([0a24067](https://github.com/polyai/adk-extension/commit/0a24067d512770a40cb4902342619d87cd897f02))
+
 ## [1.0.1](https://github.com/polyai/adk-extension/compare/v1.0.0...v1.0.1) (2026-03-10)
 
 ### Bug Fixes
