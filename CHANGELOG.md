@@ -1,3 +1,9 @@
+## [1.0.1](https://github.com/polyai/adk-extension/compare/v1.0.0...v1.0.1) (2026-03-10)
+
+### Bug Fixes
+
+* test release ([#8](https://github.com/polyai/adk-extension/issues/8)) ([2dbd3f1](https://github.com/polyai/adk-extension/commit/2dbd3f1ccfc1fab17b417ba823b0c5238d8413c6))
+
 ## 1.0.0 (2026-03-10)
 
 ### Features
