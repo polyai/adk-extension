@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.21](https://github.com/PolyAI-LDN/adk-extension/compare/v1.0.17...v1.0.21) (2024)
+## [1.0.21](https://github.com/polyai/adk-extension/compare/v1.0.17...v1.0.21) (2024)
 
 ### Features
 
@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved CI/CD with semantic-release
 - test
 
-## [1.0.17](https://github.com/PolyAI-LDN/adk-extension/compare/v1.0.10...v1.0.17) (2024)
+## [1.0.17](https://github.com/polyai/adk-extension/compare/v1.0.10...v1.0.17) (2024)
 
 ### Features
 
@@ -36,19 +36,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Condition transition labels styled in amber/yellow for easy identification
   - Edges correctly created when conditions reference other steps
 
-## [1.0.10](https://github.com/PolyAI-LDN/adk-extension/compare/v1.0.9...v1.0.10) (2024)
+## [1.0.10](https://github.com/polyai/adk-extension/compare/v1.0.9...v1.0.10) (2024)
 
 ### Bug Fixes
 
 - Fix bug with multiple transitions
 
-## [1.0.9](https://github.com/PolyAI-LDN/adk-extension/compare/v1.0.8...v1.0.9) (2024)
+## [1.0.9](https://github.com/polyai/adk-extension/compare/v1.0.8...v1.0.9) (2024)
 
 ### Features
 
 - Remove 24h check for auto updates
 
-## [1.0.8](https://github.com/PolyAI-LDN/adk-extension/compare/v1.0.6...v1.0.8) (2024)
+## [1.0.8](https://github.com/polyai/adk-extension/compare/v1.0.6...v1.0.8) (2024)
 
 ### Features
 
@@ -59,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Project/component mapping caching per project directory
   - Automatic ticket assignment to the current user
 
-## [1.0.6](https://github.com/PolyAI-LDN/adk-extension/compare/v1.0.1...v1.0.6) (2024)
+## [1.0.6](https://github.com/polyai/adk-extension/compare/v1.0.1...v1.0.6) (2024)
 
 ### Features
 
@@ -72,7 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced function resolution
 - Improved error handling and logging
 
-## [1.0.1](https://github.com/PolyAI-LDN/adk-extension/compare/v0.0.1...v1.0.1) (2024)
+## [1.0.1](https://github.com/polyai/adk-extension/compare/v0.0.1...v1.0.1) (2024)
 
 ### Features
 
@@ -80,7 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved change management
 - Better error handling
 
-## [0.0.1](https://github.com/PolyAI-LDN/adk-extension/releases/tag/v0.0.1) (2024)
+## [0.0.1](https://github.com/polyai/adk-extension/releases/tag/v0.0.1) (2024)
 
 ### Features
 
