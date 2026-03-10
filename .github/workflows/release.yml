@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'yarn'
+
+      - name: Remove package-lock.json if present
+        run: |
+          if [ -f package-lock.json ]; then
+            echo "Removing package-lock.json (using yarn instead)"
+            rm package-lock.json
+          fi
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build extension
+        run: yarn package
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+      
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.APPLICATION_ID }}
+          private-key: ${{ secrets.APPLICATION_PRIVATE_KEY }}
+
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+        run: yarn semantic-release

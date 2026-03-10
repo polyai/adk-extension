@@ -1,0 +1,124 @@
+name: PR Title Check
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  check-pr-title:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Check PR title format
+        id: check
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          echo "PR Title: $PR_TITLE"
+          
+          # Check for conventional commit format
+          # feat:, fix:, docs:, style:, refactor:, perf:, test:, chore:, ci:, build:
+          # With optional scope: feat(scope):
+          # With optional breaking change: feat!: or feat(scope)!:
+          if [[ "$PR_TITLE" =~ ^(feat|fix|docs|style|refactor|perf|test|chore|ci|build)(\(.+\))?\!?:\ .+ ]]; then
+            TYPE="${BASH_REMATCH[1]}"
+            echo "valid=true" >> $GITHUB_OUTPUT
+            echo "type=$TYPE" >> $GITHUB_OUTPUT
+            
+            # Check if it's a breaking change
+            if [[ "$PR_TITLE" =~ \!: ]]; then
+              echo "breaking=true" >> $GITHUB_OUTPUT
+            else
+              echo "breaking=false" >> $GITHUB_OUTPUT
+            fi
+            
+            # Determine release type
+            if [[ "$PR_TITLE" =~ \!: ]]; then
+              echo "release_type=major" >> $GITHUB_OUTPUT
+            elif [[ "$TYPE" == "feat" ]]; then
+              echo "release_type=minor" >> $GITHUB_OUTPUT
+            elif [[ "$TYPE" == "fix" || "$TYPE" == "perf" ]]; then
+              echo "release_type=patch" >> $GITHUB_OUTPUT
+            else
+              echo "release_type=none" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "valid=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@v3
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '<!-- pr-title-check -->'
+
+      - name: Comment on valid PR title (will release)
+        if: steps.check.outputs.valid == 'true' && steps.check.outputs.release_type != 'none'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            <!-- pr-title-check -->
+            ## ✅ Valid PR Title
+
+            | Type | Release | Breaking |
+            |------|---------|----------|
+            | `${{ steps.check.outputs.type }}` | **${{ steps.check.outputs.release_type }}** | ${{ steps.check.outputs.breaking }} |
+
+            This PR will trigger a **${{ steps.check.outputs.release_type }}** release when merged to `main`.
+
+            > The version will be automatically determined by [semantic-release](https://github.com/semantic-release/semantic-release) based on the commit messages.
+          edit-mode: replace
+
+      - name: Comment on valid PR title (no release)
+        if: steps.check.outputs.valid == 'true' && steps.check.outputs.release_type == 'none'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            <!-- pr-title-check -->
+            ## ✅ Valid PR Title
+
+            | Type | Release |
+            |------|---------|
+            | `${{ steps.check.outputs.type }}` | No release |
+
+            This PR uses a non-release commit type (`${{ steps.check.outputs.type }}`). No version bump will occur when merged.
+
+            > If you want to trigger a release, use `feat:` (minor), `fix:` (patch), or add `!` for breaking changes (major).
+          edit-mode: replace
+
+      - name: Comment on invalid PR title
+        if: steps.check.outputs.valid == 'false'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            <!-- pr-title-check -->
+            ## ❌ Invalid PR Title
+
+            Your PR title does not follow the [Conventional Commits](https://www.conventionalcommits.org/) format.
+
+            ### Required Format
+            ```
+            <type>(<optional scope>): <description>
+            ```
+
+            ### Examples
+            | Title | Release Type |
+            |-------|--------------|
+            | `feat: add new feature` | minor |
+            | `feat(parser): add new feature` | minor |
+            | `fix: resolve bug` | patch |
+            | `feat!: breaking change` | major |
+            | `docs: update readme` | no release |
+            | `chore: update dependencies` | no release |
+
+            ### Valid Types
+            `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, `ci`, `build`
+          edit-mode: replace
