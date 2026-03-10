@@ -33,6 +33,12 @@
     ["@semantic-release/changelog", {
       "changelogFile": "CHANGELOG.md"
     }],
+    [
+      "semantic-release-vsce",
+      {
+        "packageVsix": true
+      }
+    ],
     ["@semantic-release/npm", {
       "npmPublish": false
     }],
