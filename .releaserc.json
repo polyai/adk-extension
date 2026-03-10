@@ -44,7 +44,7 @@
     }],
     ["@semantic-release/github", {
       "assets": [
-        {"path": "adk-extension.vsix", "label": "VS Code Extension (${nextRelease.version})"}
+        {"path": "*.vsix"}
       ]
     }],
     ["@semantic-release/git", {
