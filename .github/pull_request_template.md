@@ -38,7 +38,7 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/) f
 
 ## Related Issues
 
-<!-- Link any related issues here using "Fixes #123" or "Relates to #123" -->
+<!-- Link any related issues here using -->
 
 ## Screenshots (if applicable)
 
