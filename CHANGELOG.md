@@ -1,3 +1,10 @@
+## 1.0.0 (2026-03-10)
+
+### Features
+
+* Remove poly ai ldn ([#4](https://github.com/polyai/adk-extension/issues/4)) ([d6c17f3](https://github.com/polyai/adk-extension/commit/d6c17f3245450e017bb3696ca00ef9fb2dfeee8e))
+* Remove vsix ([#2](https://github.com/polyai/adk-extension/issues/2)) ([d5f7ee5](https://github.com/polyai/adk-extension/commit/d5f7ee59154a6379328f2aa8d2f839476fac06b1))
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
