@@ -42,10 +42,6 @@
     ["@semantic-release/npm", {
       "npmPublish": false
     }],
-    ["@semantic-release/exec", {
-      "prepareCmd": "vsce package --out adk-extension.vsix",
-      "publishCmd": "vsce publish -p ${VSCE_PAT}"
-    }],
     ["@semantic-release/github", {
       "assets": [
         {"path": "adk-extension.vsix", "label": "VS Code Extension (${nextRelease.version})"}
