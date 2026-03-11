@@ -63,8 +63,8 @@ code --install-extension adk-extension-*.vsix
 
 **For Cursor:**
 
-1. Go to the Extensions view (`Ctrl+Shift+X` / `Cmd+Shift+X`)
-2. Click the `...` menu and select "Install from VSIX..."
+1. Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`)
+2. Type "Install from VSIX" and select **Extensions: Install from VSIX...**
 3. Select the downloaded `.vsix` file
 4. Reload the editor when prompted
 
