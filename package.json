@@ -35,16 +35,6 @@
         "command": "adk-extension.toggleDebugMode",
         "title": "ADK: Toggle Debug Mode",
         "icon": "$(debug)"
-      },
-      {
-        "command": "adk-extension.createJiraTicket",
-        "title": "ADK: Create JIRA Ticket from Branch",
-        "icon": "$(issue-opened)"
-      },
-      {
-        "command": "adk-extension.clearJiraMappings",
-        "title": "ADK: Clear JIRA Project Mappings",
-        "icon": "$(clear-all)"
       }
     ],
     "menus": {
@@ -65,16 +55,6 @@
         {
           "command": "adk-extension.toggleDebugMode",
           "title": "ADK: Toggle Debug Mode",
-          "category": "Agent Development Kit Extension"
-        },
-        {
-          "command": "adk-extension.createJiraTicket",
-          "title": "ADK: Create JIRA Ticket from Branch",
-          "category": "Agent Development Kit Extension"
-        },
-        {
-          "command": "adk-extension.clearJiraMappings",
-          "title": "ADK: Clear JIRA Project Mappings",
           "category": "Agent Development Kit Extension"
         }
       ]

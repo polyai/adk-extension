@@ -81,12 +81,6 @@ code --install-extension adk-extension-*.vsix
 
 See [Linter Documentation](src/linter/README.md) for full rule reference and CLI usage.
 
-### JIRA Integration
-
-- **Create JIRA tickets from branch** - Automatically create JIRA tickets from your current git branch changes
-- **Project/component caching** - Automatically remembers project and component mappings per project directory
-- **PR integration** - Automatically finds and updates PR descriptions with JIRA ticket links
-
 ## Usage
 
 ### Opening a Flow
@@ -103,8 +97,6 @@ Or right-click on a flow directory in the Explorer and select "View Flow".
 |---------|-------------|
 | `ADK: View Flow` | Open the flow viewer for a selected flow directory |
 | `ADK: Toggle Debug Mode` | Enable or disable debug logging |
-| `ADK: Create JIRA Ticket from Branch` | Create a JIRA ticket with changes from the current branch |
-| `ADK: Clear JIRA Project Mappings` | Clear cached JIRA project/component mappings |
 
 ### Keyboard Shortcuts
 
@@ -131,19 +123,6 @@ flow-directory/
     ├── function1.py
     └── ...
 ```
-
-## Configuration
-
-### JIRA Integration
-
-Set the following environment variables to enable JIRA integration:
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `JIRA_URL` | No | Your JIRA instance URL (defaults to `https://poly-ai.atlassian.net`) |
-| `JIRA_USER` | Yes | Your JIRA username/email |
-| `JIRA_API_TOKEN` | Yes | Your JIRA API token |
-| `GITHUB_ACCESS_TOKEN` | Yes | GitHub personal access token (for PR updates) |
 
 ## Development Setup
 
