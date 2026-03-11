@@ -14,34 +14,64 @@ You must have access to a workspace in PolyAI Agent Studio before using this ext
 
 ## Installation
 
-### From VS Code Marketplace (Recommended)
+### VS Code
+
+**From Marketplace (Recommended):**
 
 1. Open VS Code
 2. Go to the Extensions view (`Ctrl+Shift+X` / `Cmd+Shift+X`)
 3. Search for "Agent Development Kit"
 4. Click **Install**
 
-Or install directly from the command line:
+Or install from the command line:
 
 ```bash
 code --install-extension PolyAI.adk-extension
 ```
 
-### Manual Installation
+### Cursor
 
-Alternatively, download the latest `adk-extension-*.vsix` file from the [GitHub Releases](https://github.com/polyai/adk-extension/releases) page.
+**From Marketplace (Recommended):**
 
-**For VS Code / Cursor:**
+1. Open Cursor
+2. Go to the Extensions view (`Ctrl+Shift+X` / `Cmd+Shift+X`)
+3. Search for "Agent Development Kit"
+4. Click **Install**
+
+Or install from the command line:
+
+```bash
+cursor --install-extension PolyAI.adk-extension
+```
+
+### Manual Installation (VSIX)
+
+Download the latest `adk-extension-*.vsix` file from the [GitHub Releases](https://github.com/polyai/adk-extension/releases) page.
+
+**For VS Code:**
 
 1. Go to the Extensions view (`Ctrl+Shift+X` / `Cmd+Shift+X`)
 2. Click the `...` menu and select "Install from VSIX..."
 3. Select the downloaded `.vsix` file
 4. Reload the editor when prompted
 
-**From command line:**
+Or from command line:
 
 ```bash
 code --install-extension adk-extension-*.vsix
+```
+
+**For Cursor:**
+
+1. Go to the Extensions view (`Ctrl+Shift+X` / `Cmd+Shift+X`)
+2. Click the `...` menu and select "Install from VSIX..."
+3. Select the downloaded `.vsix` file
+4. Reload the editor when prompted
+
+Or from command line:
+
+```bash
+cursor --install-extension adk-extension-*.vsix
 ```
 
 ## Features
