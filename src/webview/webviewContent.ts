@@ -9,12 +9,16 @@ export function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.
 	// Load HTML content from the extension directory
 	const htmlPath = path.join(extensionUri.fsPath, 'src', 'flowViewer.html');
 	let htmlContent = fs.readFileSync(htmlPath, 'utf8');
+
+	// Replace CDN script URLs with local webview URIs for offline support
+	const d3Uri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'd3.min.js')));
+	const dagreUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'dagre.min.js')));
+	htmlContent = htmlContent.replace('https://unpkg.com/d3@7/dist/d3.min.js', d3Uri.toString());
+	htmlContent = htmlContent.replace('https://unpkg.com/dagre@0.8.5/dist/dagre.min.js', dagreUri.toString());
 	
 	// Add CSP meta tag if not present
 	const cspSource = webview.cspSource;
-	// Note: VS Code adds its own CSP, so we need to ensure our CSP allows what we need
-	// The CSP needs to allow: scripts from unpkg, inline scripts, and connections to unpkg
-	const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${cspSource} https://*.vscode-cdn.net https://unpkg.com 'unsafe-inline' 'unsafe-eval'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource} https: data:; connect-src ${cspSource} https://*.vscode-cdn.net https://unpkg.com; font-src ${cspSource} https: data:;">`;
+	const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${cspSource} 'unsafe-inline' 'unsafe-eval'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource} https: data:; font-src ${cspSource} https: data:;">`;
 	
 	// Replace existing CSP or insert new one
 	if (htmlContent.includes('Content-Security-Policy')) {

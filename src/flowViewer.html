@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flow Viewer</title>
-    <script type="text/javascript" src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
+    <script type="text/javascript" src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+    <script type="text/javascript" src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
     <style>
         body {
             margin: 0;
@@ -221,122 +222,81 @@
             display: block;
             z-index: 0;
         }
-        #network .mermaid-viewport {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            overflow: hidden;
+        #network svg {
+            width: 100%;
+            height: 100%;
             cursor: grab;
-            touch-action: none;
             user-select: none;
-            z-index: 1;
         }
-        #network .mermaid-viewport:focus {
-            outline: none;
-        }
-        #network .mermaid-viewport.panning {
+        #network svg.panning {
             cursor: grabbing;
         }
-        #network .mermaid-viewport .mermaid-transform {
-            transform-origin: 0 0;
-            display: inline-block;
-            min-width: 100%;
-            min-height: 100%;
+        #network .d3-node {
+            cursor: pointer;
         }
-        #network .mermaid-diagram {
-            display: inline-block;
-            padding: 20px;
+        #network .d3-node rect {
+            transition: stroke-width 0.15s, filter 0.15s;
         }
-        #network .mermaid-diagram svg {
-            display: block;
-            pointer-events: auto;
+        #network .d3-node:hover rect {
+            stroke: #4a90e2 !important;
+            stroke-width: 2.5px !important;
+            filter: drop-shadow(0 0 3px rgba(74, 144, 226, 0.5));
         }
-        #network .mermaid-diagram svg * {
-            pointer-events: auto;
-        }
-        #network .mermaid-node-highlighted rect,
-        #network .mermaid-node-highlighted circle,
-        #network .mermaid-node-highlighted polygon {
+        #network .d3-node.highlighted rect {
             stroke: #ff6b6b !important;
-            stroke-width: 3px !important;
+            stroke-width: 2.5px !important;
         }
-        #network .mermaid-node-dimmed {
+        #network .d3-node.dimmed {
             opacity: 0.2;
         }
-        /* Nodes: blue; edges: dark grey (lines only, no fill) */
-        #network .mermaid-diagram .edgePath path,
-        #network .mermaid-diagram g[class*="edgePath"] path {
-            stroke: #4a4a4a !important;
-            fill: none !important;
-        }
-        #network .mermaid-diagram g.edgeLabel rect,
-        #network .mermaid-diagram g[class*="edgeLabel"] rect {
-            fill: #6b7280 !important;
-            stroke: #4b5563 !important;
-        }
-        #network .mermaid-diagram g.edgeLabel text,
-        #network .mermaid-diagram g[class*="edgeLabel"] text,
-        #network .mermaid-diagram g[class*="edgeLabel"] tspan {
-            fill: #ffffff !important;
-        }
-        /* Start node = green, Exit node = red */
-        #network .mermaid-diagram [data-flow-node-id="start"] rect,
-        #network .mermaid-diagram [data-flow-node-id="start"] circle,
-        #network .mermaid-diagram [data-flow-node-id="start"] polygon,
-        #network .mermaid-diagram [data-flow-node-id="start"] path,
-        #network .mermaid-diagram rect[data-flow-node-id="start"],
-        #network .mermaid-diagram circle[data-flow-node-id="start"],
-        #network .mermaid-diagram polygon[data-flow-node-id="start"],
-        #network .mermaid-diagram path[data-flow-node-id="start"] {
-            fill: #1b5e20 !important;
-            stroke: #0d3d0d !important;
-        }
-        #network .mermaid-diagram [data-flow-node-id="start"] text,
-        #network .mermaid-diagram [data-flow-node-id="start"] tspan {
-            fill: #ffffff !important;
-        }
-        #network .mermaid-diagram [data-flow-node-id="exit"] rect,
-        #network .mermaid-diagram [data-flow-node-id="exit"] circle,
-        #network .mermaid-diagram [data-flow-node-id="exit"] polygon,
-        #network .mermaid-diagram [data-flow-node-id="exit"] path,
-        #network .mermaid-diagram rect[data-flow-node-id="exit"],
-        #network .mermaid-diagram circle[data-flow-node-id="exit"],
-        #network .mermaid-diagram polygon[data-flow-node-id="exit"],
-        #network .mermaid-diagram path[data-flow-node-id="exit"] {
-            fill: #c75050 !important;
-            stroke: #9d3a3a !important;
-        }
-        #network .mermaid-diagram [data-flow-node-id="exit"] text,
-        #network .mermaid-diagram [data-flow-node-id="exit"] tspan {
-            fill: #ffffff !important;
-        }
-        /* Hover highlight (applied via JS) – nodes = blue */
-        #network .mermaid-node-hover rect,
-        #network .mermaid-node-hover circle,
-        #network .mermaid-node-hover polygon,
-        #network .mermaid-node-hover path {
-            stroke: #4a90e2 !important;
-            stroke-width: 3px !important;
-            filter: drop-shadow(0 0 4px rgba(74, 144, 226, 0.6));
-        }
-        #network .mermaid-node-hover,
-        #network .mermaid-node-hover * {
-            cursor: pointer !important;
-        }
-        /* Hover highlight – edge/transition labels */
-        #network .mermaid-edge-label-hover,
-        #network .mermaid-edge-label-hover text,
-        #network .mermaid-edge-label-hover tspan {
-            fill: #ffffff !important;
-            font-weight: bold;
-        }
-        #network .mermaid-edge-label-hover {
+        #network .d3-edge path.edge-hit-area {
             cursor: default;
         }
-        #network [data-function-path] {
-            cursor: pointer !important;
+        #network .d3-edge:hover path.edge-line,
+        #network .d3-edge.label-hover path.edge-line {
+            stroke: #f59e0b;
+            stroke-width: 2.5px;
+        }
+        #network .d3-edge-label {
+            cursor: default;
+            opacity: 0.8;
+            transition: opacity 0.12s;
+        }
+        #network .d3-edge-label.edge-hover,
+        #network .d3-edge-label:hover {
+            opacity: 1;
+        }
+        #network .d3-edge-label.edge-hover rect,
+        #network .d3-edge-label:hover rect {
+            stroke: #f59e0b;
+            stroke-width: 1.5px;
+        }
+        #network .d3-edge-label.clickable {
+            cursor: pointer;
+        }
+        #network .d3-edge-label.clickable:hover rect {
+            filter: brightness(1.2);
+        }
+        #minimap {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            width: 180px;
+            height: 130px;
+            background-color: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 4px;
+            z-index: 999;
+            overflow: hidden;
+            cursor: crosshair;
+            opacity: 0.85;
+            transition: opacity 0.15s;
+        }
+        #minimap:hover {
+            opacity: 1;
+        }
+        .minimap-viewport {
+            pointer-events: none;
         }
         #details-panel {
             position: absolute;
@@ -1100,10 +1060,12 @@
             </div>
             <div class="toolbar-group">
                 <button class="toolbar-btn" onclick="fitNetwork()" title="Fit to Screen">Fit</button>
+                <button id="layout-toggle-btn" class="toolbar-btn" onclick="toggleLayout()" title="Toggle layout direction">↔ LR</button>
                 <button class="toolbar-btn" onclick="showEntitiesPanel()" title="View Entities">Entities</button>
             </div>
         </div>
         <div id="network"></div>
+        <div id="minimap"></div>
         <div id="details-panel">
             <div id="save-discard-bar">
                 <button class="save-btn" onclick="saveAllChanges(currentNodeId, getCurrentStepFilePath())">Save</button>
@@ -1253,9 +1215,11 @@
         const vscode = acquireVsCodeApi();
         let flowGraph = null;
         let selectedNodeId = null;
-        let mermaidMidToNodeId = new Map();
-        let mermaidDiagramEl = null;
-        let nodeIdToRootEl = new Map();
+        let d3Svg = null;
+        let d3MainGroup = null;
+        let d3Zoom = null;
+        let nodeElements = new Map();
+        let currentLayoutDirection = 'LR';
 
         window.addEventListener('message', event => {
             const message = event.data;
@@ -1299,514 +1263,855 @@
         });
 
 
-        // Calculate node levels for hierarchical layout (BFS from start node)
-        function calculateNodeLevels(graph) {
-            const levels = new Map();
-            const visited = new Set();
-            const queue = [];
-            
-            // Find start node
-            const startNode = graph.nodes.find(n => n.id === 'start');
-            if (startNode) {
-                levels.set('start', 0);
-                queue.push({ nodeId: 'start', level: 0 });
-                visited.add('start');
+        function getNodeColor(type) {
+            switch (type) {
+                case 'step':
+                    return { fill: '#4a90e2', stroke: '#2e5c8a' };
+                case 'function':
+                case 'function-step':
+                    return { fill: '#7b68ee', stroke: '#5a4fcf' };
+                case 'end':
+                    return { fill: '#1b5e20', stroke: '#0d3d0d' };
+                case 'exit':
+                    return { fill: '#c75050', stroke: '#9d3a3a' };
+                case 'no-code-step':
+                    return { fill: '#10b981', stroke: '#059669' };
+                default:
+                    return { fill: '#848484', stroke: '#666' };
             }
-            
-            // BFS to assign levels
-            while (queue.length > 0) {
-                const { nodeId, level } = queue.shift();
-                
-                // Find all edges going from this node
-                graph.edges.forEach(edge => {
-                    if (edge.from === nodeId && !visited.has(edge.to)) {
-                        levels.set(edge.to, level + 1);
-                        visited.add(edge.to);
-                        queue.push({ nodeId: edge.to, level: level + 1 });
-                    }
-                });
-            }
-            
-            // Assign remaining nodes to max level + 1
-            const maxLevel = Math.max(...Array.from(levels.values()), -1);
-            graph.nodes.forEach(node => {
-                if (!levels.has(node.id)) {
-                    levels.set(node.id, maxLevel + 1);
-                }
-            });
-            
-            return levels;
         }
 
-        function graphToMermaid(graph) {
-            const midToNodeId = new Map();
-            if (!graph || !graph.nodes || !graph.edges) return { mermaid: '', midToNodeId };
-            const lines = ['flowchart TD'];
-            const sanitizeId = (id) => String(id).replace(/[^a-zA-Z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'node';
-            const escapeLabel = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-            const nodeIds = new Map();
-            const usedMids = new Set();
-            let idx = 0;
-            graph.nodes.forEach(node => {
-                let mid = nodeIds.get(node.id);
-                if (mid === undefined) {
-                    mid = sanitizeId(node.id) || ('n' + idx++);
-                    while (usedMids.has(mid)) mid = (sanitizeId(node.id) || 'n') + '_' + (idx++);
-                    usedMids.add(mid);
-                    nodeIds.set(node.id, mid);
-                    midToNodeId.set(mid, node.id);
-                }
-            });
-            graph.nodes.forEach(node => {
-                const mid = nodeIds.get(node.id);
-                const label = escapeLabel(node.label);
-                if (node.type === 'end' && node.id === 'start') lines.push('    ' + mid + '(("' + label + '"))');
-                else if (node.type === 'exit') lines.push('    ' + mid + '(("' + label + '"))');
-                else lines.push('    ' + mid + '["' + label + '"]');
-            });
-            graph.edges.forEach(edge => {
-                const fromId = nodeIds.get(edge.from);
-                const toId = nodeIds.get(edge.to);
-                if (fromId === undefined || toId === undefined) return;
-                let edgeLabel = edge.label ? escapeLabel(edge.label).replace(/\|/g, '_') : '';
-                if (edgeLabel) {
-                    edgeLabel = '"' + edgeLabel + '"';
-                    lines.push('    ' + fromId + ' -->|' + edgeLabel + '| ' + toId);
+        var NODE_MIN_WIDTH = 100;
+        var NODE_MAX_WIDTH = 200;
+        var NODE_LINE_HEIGHT = 14;
+        var NODE_PAD_X = 14;
+        var NODE_PAD_Y = 8;
+
+        function wrapLabel(text, maxWidth, ctx) {
+            var words = text.split(/(?=[_A-Z])|[\s]+/);
+            var lines = [];
+            var line = '';
+            for (var i = 0; i < words.length; i++) {
+                var test = line ? line + words[i] : words[i];
+                if (ctx.measureText(test).width > maxWidth && line) {
+                    lines.push(line);
+                    line = words[i];
                 } else {
-                    lines.push('    ' + fromId + ' --> ' + toId);
+                    line = test;
                 }
+            }
+            if (line) lines.push(line);
+            return lines;
+        }
+
+        function computeLayout(graph) {
+            var isLR = currentLayoutDirection === 'LR';
+
+            var canvas = document.createElement('canvas');
+            var ctx = canvas.getContext('2d');
+            ctx.font = '11px sans-serif';
+            var edgeLabelCtx = canvas.getContext('2d');
+            edgeLabelCtx.font = '10px sans-serif';
+            var maxLabelW = 0, maxLabelH = 16;
+            var edgesBySource = {};
+            graph.edges.forEach(function(edge) {
+                var lbl = edge.label || '';
+                if (lbl) {
+                    var tw = edgeLabelCtx.measureText(lbl).width + 10;
+                    if (tw > maxLabelW) maxLabelW = tw;
+                }
+                if (!edgesBySource[edge.from]) edgesBySource[edge.from] = 0;
+                edgesBySource[edge.from]++;
             });
-            
-            const startMid = nodeIds.get('start');
-            const exitMid = nodeIds.get('exit');
-            if (startMid) lines.push('    style ' + startMid + ' fill:#1b5e20,stroke:#0d3d0d,color:#fff');
-            if (exitMid) lines.push('    style ' + exitMid + ' fill:#c75050,stroke:#9d3a3a,color:#fff');
-            // Style no-code-step nodes with green color
-            graph.nodes.filter(n => n.type === 'no-code-step').forEach(n => {
-                const mid = nodeIds.get(n.id);
-                if (mid) lines.push('    style ' + mid + ' fill:#10b981,stroke:#059669,color:#fff');
+            var maxFanOut = 0;
+            for (var k in edgesBySource) {
+                if (edgesBySource[k] > maxFanOut) maxFanOut = edgesBySource[k];
+            }
+
+            var baseRanksep = isLR ? 30 : 25;
+            var baseNodesep = isLR ? 14 : 16;
+            var labelRoom = maxLabelW > 0 ? maxLabelW + 10 : 0;
+            var fanOutRoom = Math.max(0, (maxFanOut - 1) * (maxLabelH + 4));
+
+            var ranksep = Math.max(baseRanksep, isLR ? labelRoom : baseRanksep + maxLabelH + 8);
+            var nodesep = Math.max(baseNodesep, isLR ? baseNodesep + fanOutRoom * 0.3 : baseNodesep);
+
+            ranksep = Math.min(ranksep, 120);
+            nodesep = Math.min(nodesep, 60);
+
+            var g = new dagre.graphlib.Graph();
+            g.setGraph({
+                rankdir: currentLayoutDirection,
+                ranksep: ranksep,
+                nodesep: nodesep,
+                edgesep: Math.max(8, Math.min(20, maxFanOut * 3)),
+                marginx: 15,
+                marginy: 15
             });
-            
-            return { mermaid: lines.join('\n'), midToNodeId };
+            g.setDefaultEdgeLabel(function() { return {}; });
+
+            graph.nodes.forEach(function(node) {
+                var label = node.label || node.id;
+                var textW = ctx.measureText(label).width;
+                var nodeW, nodeH, lines;
+                if (textW + NODE_PAD_X * 2 <= NODE_MAX_WIDTH) {
+                    nodeW = Math.max(NODE_MIN_WIDTH, textW + NODE_PAD_X * 2);
+                    nodeH = NODE_LINE_HEIGHT + NODE_PAD_Y * 2;
+                    lines = [label];
+                } else {
+                    nodeW = NODE_MAX_WIDTH;
+                    lines = wrapLabel(label, NODE_MAX_WIDTH - NODE_PAD_X * 2, ctx);
+                    nodeH = lines.length * NODE_LINE_HEIGHT + NODE_PAD_Y * 2;
+                }
+                g.setNode(node.id, { label: label, width: nodeW, height: nodeH, nodeData: node, lines: lines, nodeW: nodeW, nodeH: nodeH });
+            });
+
+            graph.edges.forEach(function(edge, i) {
+                g.setEdge(edge.from, edge.to, {
+                    width: 0,
+                    height: 0,
+                    edgeData: edge,
+                    id: 'edge-' + i
+                });
+            });
+
+            dagre.layout(g);
+            return g;
+        }
+
+        function orthogonalVertices(points, sourceNode, targetNode, isLR) {
+            if (!points || points.length < 2) return [];
+            var srcW = sourceNode.nodeW || sourceNode.width;
+            var srcH = sourceNode.nodeH || sourceNode.height;
+            var tgtW = targetNode.nodeW || targetNode.width;
+            var tgtH = targetNode.nodeH || targetNode.height;
+
+            var srcExit, tgtEntry;
+            if (isLR) {
+                srcExit = { x: sourceNode.x + srcW / 2, y: sourceNode.y };
+                tgtEntry = { x: targetNode.x - tgtW / 2, y: targetNode.y };
+            } else {
+                srcExit = { x: sourceNode.x, y: sourceNode.y + srcH / 2 };
+                tgtEntry = { x: targetNode.x, y: targetNode.y - tgtH / 2 };
+            }
+
+            var verts = [srcExit];
+
+            if (isLR) {
+                if (Math.abs(srcExit.y - tgtEntry.y) < 1) {
+                    verts.push(tgtEntry);
+                } else {
+                    var midX;
+                    if (points.length > 2) {
+                        midX = points[Math.floor(points.length / 2)].x;
+                    } else {
+                        midX = (srcExit.x + tgtEntry.x) / 2;
+                    }
+                    verts.push({ x: midX, y: srcExit.y });
+                    verts.push({ x: midX, y: tgtEntry.y });
+                    verts.push(tgtEntry);
+                }
+            } else {
+                if (Math.abs(srcExit.x - tgtEntry.x) < 1) {
+                    verts.push(tgtEntry);
+                } else {
+                    var midY;
+                    if (points.length > 2) {
+                        midY = points[Math.floor(points.length / 2)].y;
+                    } else {
+                        midY = (srcExit.y + tgtEntry.y) / 2;
+                    }
+                    verts.push({ x: srcExit.x, y: midY });
+                    verts.push({ x: tgtEntry.x, y: midY });
+                    verts.push(tgtEntry);
+                }
+            }
+            return verts;
+        }
+
+        function vertsToPathD(verts) {
+            if (verts.length === 0) return '';
+            var d = 'M ' + verts[0].x + ' ' + verts[0].y;
+            for (var i = 1; i < verts.length; i++) {
+                d += ' L ' + verts[i].x + ' ' + verts[i].y;
+            }
+            return d;
+        }
+
+        function toggleLayout() {
+            currentLayoutDirection = currentLayoutDirection === 'LR' ? 'TB' : 'LR';
+            var btn = document.getElementById('layout-toggle-btn');
+            if (btn) btn.textContent = currentLayoutDirection === 'LR' ? '↔ LR' : '↕ TB';
+            if (flowGraph) {
+                loadFlow(flowGraph);
+            }
         }
 
         function loadFlow(graph) {
             console.log('loadFlow called with graph:', graph);
             const container = document.getElementById('network');
             if (!container) return;
-            if (typeof mermaid === 'undefined') {
-                container.innerHTML = '<div style="padding: 20px; text-align: center; color: red;">Error: Mermaid library failed to load.</div>';
+
+            if (typeof d3 === 'undefined' || typeof dagre === 'undefined') {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: red;">Error: D3 or dagre library failed to load.</div>';
                 return;
             }
             if (!graph || !graph.nodes || graph.nodes.length === 0) {
                 container.innerHTML = '<div style="padding: 20px; text-align: center;">No nodes found in flow.</div>';
                 return;
             }
+
             flowGraph = graph;
-            const { mermaid: mermaidCode, midToNodeId } = graphToMermaid(graph);
-            mermaidMidToNodeId = midToNodeId;
+            nodeElements.clear();
             container.innerHTML = '';
-            const viewport = document.createElement('div');
-            viewport.className = 'mermaid-viewport';
-            const transformDiv = document.createElement('div');
-            transformDiv.className = 'mermaid-transform';
-            const diagramWrapper = document.createElement('div');
-            diagramWrapper.className = 'mermaid-diagram';
-            transformDiv.appendChild(diagramWrapper);
-            viewport.appendChild(transformDiv);
-            container.appendChild(viewport);
-            const uniqueId = 'flowchart-' + Date.now();
-            mermaid.render(uniqueId, mermaidCode).then(({ svg }) => {
-                diagramWrapper.innerHTML = svg;
-                mermaidDiagramEl = diagramWrapper;
-                viewport.tabIndex = 0;
-                viewport.focus();
-                markMermaidNodes(diagramWrapper);
-                markMermaidEdgeLabels(diagramWrapper);
-                filterNodes();
-                setupDiagramHover(viewport);
-                requestAnimationFrame(() => {
-                    const vw = viewport.offsetWidth;
-                    const vh = viewport.offsetHeight;
-                    const dw = diagramWrapper.offsetWidth;
-                    const dh = diagramWrapper.offsetHeight;
-                    const padding = 0.92;
-                    const scaleX = vw / (dw || 1);
-                    const scaleY = vh / (dh || 1);
-                    const initialScale = Math.min(scaleX, scaleY) * padding;
-                    const initialX = Math.max(0, (vw - dw * initialScale) / 2);
-                    const initialY = Math.max(0, (vh - dh * initialScale) / 2);
-                    setupMermaidZoomPan(viewport, transformDiv, initialScale, initialX, initialY);
-                });
-                setupDiagramClickHandler();
-                updateStats();
-            }).catch(err => {
-                console.error('Mermaid render error:', err);
-                diagramWrapper.innerHTML = '<div style="padding: 20px; color: red;">Failed to render diagram. Check console.</div>';
+
+            const layoutGraph = computeLayout(graph);
+
+            const svg = d3.select(container).append('svg')
+                .attr('width', '100%')
+                .attr('height', '100%');
+            d3Svg = svg;
+
+            const defs = svg.append('defs');
+            defs.append('marker')
+                .attr('id', 'arrowhead')
+                .attr('viewBox', '0 0 10 10')
+                .attr('refX', 9)
+                .attr('refY', 5)
+                .attr('markerWidth', 6)
+                .attr('markerHeight', 6)
+                .attr('orient', 'auto-start-reverse')
+                .append('path')
+                .attr('d', 'M 0 0 L 10 5 L 0 10 z')
+                .attr('fill', '#555');
+
+            const mainGroup = svg.append('g').attr('class', 'd3-graph');
+            d3MainGroup = mainGroup;
+
+            let lastMouseDown = null;
+            svg.on('mousedown.track', function(event) {
+                lastMouseDown = { x: event.clientX, y: event.clientY };
             });
-        }
 
-        function setupMermaidZoomPan(viewport, transformEl, initialScale, initialTranslateX, initialTranslateY) {
-            let scale = initialScale != null ? initialScale : 1;
-            let translateX = initialTranslateX != null ? initialTranslateX : 0;
-            let translateY = initialTranslateY != null ? initialTranslateY : 0;
-            let panStartX = 0, panStartY = 0, startTranslateX = 0, startTranslateY = 0;
-            let isPanning = false;
-            let didPan = false;
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 40])
+                .on('zoom', function(event) {
+                    mainGroup.attr('transform', event.transform);
+                    syncMinimap();
+                });
+            d3Zoom = zoom;
+            svg.call(zoom);
 
-            function applyTransform() {
-                transformEl.style.transform = 'translate(' + translateX + 'px,' + translateY + 'px) scale(' + scale + ')';
+            svg.on('click.deselect', function(event) {
+                if (lastMouseDown) {
+                    const dx = Math.abs(event.clientX - lastMouseDown.x);
+                    const dy = Math.abs(event.clientY - lastMouseDown.y);
+                    if (dx > 3 || dy > 3) return;
+                }
+                if (event.target.closest('.d3-node') || event.target.closest('.d3-edge-label')) return;
+                clearSelection();
+                closeDetails();
+            });
+
+            const edgeGroup = mainGroup.append('g').attr('class', 'd3-edges');
+            const edgeLabelLayer = mainGroup.append('g').attr('class', 'd3-edge-labels');
+
+            var labelPad = 14;
+            var nodeRects = [];
+            layoutGraph.nodes().forEach(function(nid) {
+                var n = layoutGraph.node(nid);
+                var nw = n.nodeW || n.width;
+                var nh = n.nodeH || n.height;
+                nodeRects.push({
+                    x: n.x - nw / 2 - labelPad,
+                    y: n.y - nh / 2 - labelPad,
+                    w: nw + labelPad * 2,
+                    h: nh + labelPad * 2
+                });
+            });
+            var placedLabels = [];
+
+            function rectsOverlap(a, b) {
+                return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
             }
 
-            viewport.addEventListener('wheel', (e) => {
-                e.preventDefault();
-                const delta = e.deltaY > 0 ? -0.15 : 0.15;
-                const newScale = Math.min(40, Math.max(0.1, scale + delta));
-                const rect = viewport.getBoundingClientRect();
-                const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-                translateX = mx - (mx - translateX) * (newScale / scale);
-                translateY = my - (my - translateY) * (newScale / scale);
-                scale = newScale;
-                applyTransform();
-            }, { passive: false });
-
-            viewport.addEventListener('mousedown', (e) => {
-                if (e.button !== 0) return;
-                viewport._didPanJustNow = false;
-                const nodeId = getNodeIdFromElement(e.target);
-                if (nodeId) {
-                    didPan = false;
-                    return;
+            function hasAnyOverlap(rect) {
+                for (var i = 0; i < nodeRects.length; i++) {
+                    if (rectsOverlap(rect, nodeRects[i])) return true;
                 }
-                didPan = false;
-                isPanning = true;
-                viewport.classList.add('panning');
-                panStartX = e.clientX;
-                panStartY = e.clientY;
-                startTranslateX = translateX;
-                startTranslateY = translateY;
+                for (var i = 0; i < placedLabels.length; i++) {
+                    if (rectsOverlap(rect, placedLabels[i])) return true;
+                }
+                return false;
+            }
+
+            var isLR = currentLayoutDirection === 'LR';
+
+            var edgeGroups = new Map();
+            layoutGraph.edges().forEach(function(e) {
+                var edgeData = layoutGraph.edge(e);
+                var originalEdge = edgeData.edgeData;
+                var points = edgeData.points;
+                if (!points || points.length === 0) return;
+                var label = originalEdge ? (originalEdge.label || '') : '';
+                var key = e.v + '|' + label;
+                if (!edgeGroups.has(key)) edgeGroups.set(key, []);
+                edgeGroups.get(key).push({ e: e, edgeData: edgeData, originalEdge: originalEdge, points: points });
             });
 
-            viewport.addEventListener('mousemove', (e) => {
-                if (!isPanning) return;
-                if (Math.abs(e.clientX - panStartX) > 3 || Math.abs(e.clientY - panStartY) > 3) didPan = true;
-                translateX = startTranslateX + (e.clientX - panStartX);
-                translateY = startTranslateY + (e.clientY - panStartY);
-                applyTransform();
+            function pointOnPolyline(pts, t) {
+                var segs = [];
+                var totalLen = 0;
+                for (var i = 1; i < pts.length; i++) {
+                    var dx = pts[i].x - pts[i-1].x, dy = pts[i].y - pts[i-1].y;
+                    var len = Math.sqrt(dx*dx + dy*dy);
+                    segs.push({ s: pts[i-1], e: pts[i], len: len });
+                    totalLen += len;
+                }
+                if (totalLen < 1) return { x: pts[0].x, y: pts[0].y };
+                var target = Math.max(0, Math.min(1, t)) * totalLen;
+                var accum = 0;
+                for (var i = 0; i < segs.length; i++) {
+                    if (accum + segs[i].len >= target || i === segs.length - 1) {
+                        var frac = segs[i].len > 0 ? (target - accum) / segs[i].len : 0;
+                        return {
+                            x: segs[i].s.x + (segs[i].e.x - segs[i].s.x) * frac,
+                            y: segs[i].s.y + (segs[i].e.y - segs[i].s.y) * frac
+                        };
+                    }
+                    accum += segs[i].len;
+                }
+                return { x: pts[pts.length-1].x, y: pts[pts.length-1].y };
+            }
+
+            function renderEdgeLabel(edgeG, labelText, pathPoints, originalEdge) {
+                var isCondition = originalEdge && originalEdge.type === 'condition';
+                var hasFunctionPath = originalEdge && originalEdge.functionFilePath;
+
+                var labelG = edgeLabelLayer.append('g')
+                    .attr('class', 'd3-edge-label' + (hasFunctionPath ? ' clickable' : ''));
+
+                var tempText = labelG.append('text')
+                    .attr('font-size', '10px')
+                    .attr('font-family', 'sans-serif')
+                    .text(labelText);
+                var bbox = tempText.node().getBBox();
+                tempText.remove();
+
+                var padX = 5, padY = 3;
+                var labelW = bbox.width + padX * 2;
+                var labelH = bbox.height + padY * 2;
+
+                var totalSamples = 50;
+                var pathLen = 0;
+                for (var pi = 1; pi < pathPoints.length; pi++) {
+                    var pdx = pathPoints[pi].x - pathPoints[pi-1].x;
+                    var pdy = pathPoints[pi].y - pathPoints[pi-1].y;
+                    pathLen += Math.sqrt(pdx*pdx + pdy*pdy);
+                }
+                var safeMargin = pathLen > 1 ? Math.max(0.05, (labelW / 2 + labelPad + 6) / pathLen) : 0.15;
+                var minT = Math.min(safeMargin, 0.4);
+                var maxT = Math.max(1.0 - safeMargin, 0.6);
+                var startT = minT;
+                var startPt = pointOnPolyline(pathPoints, startT);
+                var candidateRect = { x: startPt.x - labelW / 2, y: startPt.y - labelH / 2, w: labelW, h: labelH };
+
+                if (hasAnyOverlap(candidateRect)) {
+                    var found = false;
+                    for (var s = 1; s <= totalSamples && !found; s++) {
+                        var tFwd = startT + (s / totalSamples) * (maxT - startT);
+                        var ptF = pointOnPolyline(pathPoints, tFwd);
+                        candidateRect.x = ptF.x - labelW / 2;
+                        candidateRect.y = ptF.y - labelH / 2;
+                        if (!hasAnyOverlap(candidateRect)) { found = true; break; }
+                        if (s <= 10) {
+                            var tBwd = startT - (s / 10) * (startT - minT);
+                            var ptB = pointOnPolyline(pathPoints, tBwd);
+                            candidateRect.x = ptB.x - labelW / 2;
+                            candidateRect.y = ptB.y - labelH / 2;
+                            if (!hasAnyOverlap(candidateRect)) { found = true; break; }
+                        }
+                    }
+                    if (!found) {
+                        var bestOverlap = Infinity;
+                        var bestRect = { x: startPt.x - labelW/2, y: startPt.y - labelH/2, w: labelW, h: labelH };
+                        for (var s = 0; s <= totalSamples; s++) {
+                            var t = minT + (s / totalSamples) * (maxT - minT);
+                            var pt = pointOnPolyline(pathPoints, t);
+                            var tr = { x: pt.x - labelW/2, y: pt.y - labelH/2, w: labelW, h: labelH };
+                            var totalOv = 0;
+                            for (var j = 0; j < nodeRects.length; j++) {
+                                if (rectsOverlap(tr, nodeRects[j])) {
+                                    var ox = Math.min(tr.x+tr.w, nodeRects[j].x+nodeRects[j].w) - Math.max(tr.x, nodeRects[j].x);
+                                    var oy = Math.min(tr.y+tr.h, nodeRects[j].y+nodeRects[j].h) - Math.max(tr.y, nodeRects[j].y);
+                                    totalOv += ox * oy * 10;
+                                }
+                            }
+                            for (var j = 0; j < placedLabels.length; j++) {
+                                if (rectsOverlap(tr, placedLabels[j])) {
+                                    var ox = Math.min(tr.x+tr.w, placedLabels[j].x+placedLabels[j].w) - Math.max(tr.x, placedLabels[j].x);
+                                    var oy = Math.min(tr.y+tr.h, placedLabels[j].y+placedLabels[j].h) - Math.max(tr.y, placedLabels[j].y);
+                                    totalOv += ox * oy;
+                                }
+                            }
+                            if (totalOv < bestOverlap) {
+                                bestOverlap = totalOv;
+                                bestRect = { x: tr.x, y: tr.y, w: tr.w, h: tr.h };
+                            }
+                        }
+                        candidateRect = bestRect;
+                    }
+                }
+
+                var finalX = candidateRect.x + labelW / 2;
+                var finalY = candidateRect.y + labelH / 2;
+                placedLabels.push({ x: candidateRect.x, y: candidateRect.y, w: candidateRect.w, h: candidateRect.h });
+
+                labelG.attr('transform', 'translate(' + finalX + ',' + finalY + ')');
+
+                labelG.append('rect')
+                    .attr('x', -labelW / 2)
+                    .attr('y', -labelH / 2)
+                    .attr('width', labelW)
+                    .attr('height', labelH)
+                    .attr('rx', 3)
+                    .attr('fill', isCondition ? '#854d0e' : '#505860')
+                    .attr('stroke', isCondition ? '#a16207' : '#6b7280')
+                    .attr('stroke-width', 0.5);
+
+                labelG.append('text')
+                    .attr('text-anchor', 'middle')
+                    .attr('dominant-baseline', 'central')
+                    .attr('fill', isCondition ? '#fef08a' : '#e5e7eb')
+                    .attr('font-size', '10px')
+                    .attr('font-family', 'sans-serif')
+                    .text(labelText);
+
+                if (hasFunctionPath) {
+                    labelG.on('click', function(event) {
+                        event.stopPropagation();
+                        vscode.postMessage({ command: 'openFunction', filePath: originalEdge.functionFilePath });
+                    });
+                }
+
+                edgeG.on('mouseenter.label', function() {
+                    labelG.classed('edge-hover', true);
+                    edgeG.raise();
+                    labelG.raise();
+                }).on('mouseleave.label', function() {
+                    labelG.classed('edge-hover', false);
+                });
+                labelG.on('mouseenter.edge', function() {
+                    edgeG.classed('label-hover', true);
+                    edgeG.raise();
+                    labelG.raise();
+                }).on('mouseleave.edge', function() {
+                    edgeG.classed('label-hover', false);
+                });
+            }
+
+            function renderSingleEdge(item) {
+                var edgeG = edgeGroup.append('g').attr('class', 'd3-edge');
+                var sourceNode = layoutGraph.node(item.e.v);
+                var targetNode = layoutGraph.node(item.e.w);
+                var verts = orthogonalVertices(item.points, sourceNode, targetNode, isLR);
+                var pathD = vertsToPathD(verts);
+
+                edgeG.append('path')
+                    .attr('class', 'edge-hit-area')
+                    .attr('d', pathD)
+                    .attr('fill', 'none')
+                    .attr('stroke', 'transparent')
+                    .attr('stroke-width', 12);
+                edgeG.append('path')
+                    .attr('class', 'edge-line')
+                    .attr('d', pathD)
+                    .attr('fill', 'none')
+                    .attr('stroke', '#555')
+                    .attr('stroke-width', 1.5)
+                    .attr('marker-end', 'url(#arrowhead)');
+
+                var edgeLabel = item.originalEdge ? (item.originalEdge.label || '') : '';
+                if (edgeLabel) {
+                    renderEdgeLabel(edgeG, edgeLabel, verts, item.originalEdge);
+                }
+            }
+
+            function renderGroupedEdges(items) {
+                var sourceNode = layoutGraph.node(items[0].e.v);
+                var srcW = sourceNode.nodeW || sourceNode.width;
+                var srcH = sourceNode.nodeH || sourceNode.height;
+                var groupG = edgeGroup.append('g').attr('class', 'd3-edge d3-edge-group');
+                var forkGap = isLR ? 15 : 15;
+                var forkX, forkY;
+
+                if (isLR) {
+                    forkX = sourceNode.x + srcW / 2 + forkGap;
+                    forkY = sourceNode.y;
+                } else {
+                    forkX = sourceNode.x;
+                    forkY = sourceNode.y + srcH / 2 + forkGap;
+                }
+
+                var trunkD;
+                if (isLR) {
+                    trunkD = 'M ' + (sourceNode.x + srcW / 2) + ' ' + sourceNode.y + ' L ' + forkX + ' ' + forkY;
+                } else {
+                    trunkD = 'M ' + sourceNode.x + ' ' + (sourceNode.y + srcH / 2) + ' L ' + forkX + ' ' + forkY;
+                }
+
+                groupG.append('path')
+                    .attr('class', 'edge-hit-area')
+                    .attr('d', trunkD)
+                    .attr('fill', 'none')
+                    .attr('stroke', 'transparent')
+                    .attr('stroke-width', 12);
+                groupG.append('path')
+                    .attr('class', 'edge-line')
+                    .attr('d', trunkD)
+                    .attr('fill', 'none')
+                    .attr('stroke', '#555')
+                    .attr('stroke-width', 1.5);
+
+                for (var i = 0; i < items.length; i++) {
+                    var item = items[i];
+                    var targetNode = layoutGraph.node(item.e.w);
+                    var tgtW = targetNode.nodeW || targetNode.width;
+                    var tgtH = targetNode.nodeH || targetNode.height;
+                    var branchG = groupG.append('g').attr('class', 'd3-edge-branch');
+                    var branchD;
+
+                    if (isLR) {
+                        var targetEntry = targetNode.x - tgtW / 2;
+                        branchD = 'M ' + forkX + ' ' + forkY
+                            + ' L ' + forkX + ' ' + targetNode.y
+                            + ' L ' + targetEntry + ' ' + targetNode.y;
+                    } else {
+                        var targetEntry = targetNode.y - tgtH / 2;
+                        branchD = 'M ' + forkX + ' ' + forkY
+                            + ' L ' + targetNode.x + ' ' + forkY
+                            + ' L ' + targetNode.x + ' ' + targetEntry;
+                    }
+
+                    branchG.append('path')
+                        .attr('class', 'edge-hit-area')
+                        .attr('d', branchD)
+                        .attr('fill', 'none')
+                        .attr('stroke', 'transparent')
+                        .attr('stroke-width', 12);
+                    branchG.append('path')
+                        .attr('class', 'edge-line')
+                        .attr('d', branchD)
+                        .attr('fill', 'none')
+                        .attr('stroke', '#555')
+                        .attr('stroke-width', 1.5)
+                        .attr('marker-end', 'url(#arrowhead)');
+                }
+
+                var edgeLabel = items[0].originalEdge ? (items[0].originalEdge.label || '') : '';
+                if (edgeLabel) {
+                    var trunkStart;
+                    if (isLR) {
+                        trunkStart = { x: sourceNode.x + srcW / 2, y: sourceNode.y };
+                    } else {
+                        trunkStart = { x: sourceNode.x, y: sourceNode.y + srcH / 2 };
+                    }
+                    var longestBranch = null, longestLen = 0;
+                    for (var b = 0; b < items.length; b++) {
+                        var tn = layoutGraph.node(items[b].e.w);
+                        var dx = tn.x - forkX, dy = tn.y - forkY;
+                        var bLen = Math.sqrt(dx*dx + dy*dy);
+                        if (bLen > longestLen) { longestLen = bLen; longestBranch = tn; }
+                    }
+                    var labelPath = [trunkStart, { x: forkX, y: forkY }];
+                    if (longestBranch) {
+                        var lbW = longestBranch.nodeW || longestBranch.width;
+                        var lbH = longestBranch.nodeH || longestBranch.height;
+                        if (isLR) {
+                            labelPath.push({ x: forkX, y: longestBranch.y });
+                            labelPath.push({ x: longestBranch.x - lbW / 2, y: longestBranch.y });
+                        } else {
+                            labelPath.push({ x: longestBranch.x, y: forkY });
+                            labelPath.push({ x: longestBranch.x, y: longestBranch.y - lbH / 2 });
+                        }
+                    }
+                    renderEdgeLabel(groupG, edgeLabel, labelPath, items[0].originalEdge);
+                }
+            }
+
+            edgeGroups.forEach(function(items, key) {
+                if (items.length === 1) {
+                    renderSingleEdge(items[0]);
+                } else {
+                    renderGroupedEdges(items);
+                }
             });
 
-            viewport.addEventListener('mouseup', () => {
-                viewport._didPanJustNow = didPan;
-                isPanning = false;
-                viewport.classList.remove('panning');
+            const nodeGroup = mainGroup.append('g').attr('class', 'd3-nodes');
+
+            layoutGraph.nodes().forEach(function(nodeId) {
+                const nodeLayout = layoutGraph.node(nodeId);
+                const nodeData = nodeLayout.nodeData;
+                const colors = getNodeColor(nodeData.type);
+                const isTerminal = nodeData.type === 'end' || nodeData.type === 'exit';
+                const w = nodeLayout.nodeW || nodeLayout.width;
+                const h = nodeLayout.nodeH || nodeLayout.height;
+                const lines = nodeLayout.lines || [nodeLayout.label];
+
+                const nodeG = nodeGroup.append('g')
+                    .attr('class', 'd3-node')
+                    .attr('data-node-id', nodeId)
+                    .attr('transform', 'translate(' + (nodeLayout.x - w / 2) + ',' + (nodeLayout.y - h / 2) + ')')
+                    .style('cursor', 'pointer');
+
+                nodeG.append('rect')
+                    .attr('width', w)
+                    .attr('height', h)
+                    .attr('rx', isTerminal ? h / 2 : 4)
+                    .attr('ry', isTerminal ? h / 2 : 4)
+                    .attr('fill', colors.fill)
+                    .attr('stroke', colors.stroke)
+                    .attr('stroke-width', 1.5);
+
+                if (lines.length === 1) {
+                    var textEl = nodeG.append('text')
+                        .attr('x', w / 2)
+                        .attr('y', h / 2)
+                        .attr('text-anchor', 'middle')
+                        .attr('dominant-baseline', 'central')
+                        .attr('fill', '#ffffff')
+                        .attr('font-size', '11px')
+                        .attr('font-family', 'sans-serif')
+                        .attr('pointer-events', 'none')
+                        .text(lines[0]);
+
+                    var textNode = textEl.node();
+                    if (textNode && textNode.getComputedTextLength && textNode.getComputedTextLength() > w - 12) {
+                        var lbl = lines[0];
+                        while (lbl.length > 1 && textNode.getComputedTextLength() > w - 18) {
+                            lbl = lbl.slice(0, -1);
+                            textEl.text(lbl + '…');
+                        }
+                    }
+                } else {
+                    var totalTextH = lines.length * NODE_LINE_HEIGHT;
+                    var startY = (h - totalTextH) / 2 + NODE_LINE_HEIGHT / 2;
+                    for (var li = 0; li < lines.length; li++) {
+                        nodeG.append('text')
+                            .attr('x', w / 2)
+                            .attr('y', startY + li * NODE_LINE_HEIGHT)
+                            .attr('text-anchor', 'middle')
+                            .attr('dominant-baseline', 'central')
+                            .attr('fill', '#ffffff')
+                            .attr('font-size', '11px')
+                            .attr('font-family', 'sans-serif')
+                            .attr('pointer-events', 'none')
+                            .text(lines[li]);
+                    }
+                }
+
+                nodeG.append('title').text(nodeLayout.label);
+
+                nodeG.on('click', function(event) {
+                    event.stopPropagation();
+                    selectedNodeId = nodeId;
+                    highlightNode(nodeId);
+                    showDetails(nodeData);
+                });
+
+                nodeG.on('mouseenter', function() {
+                    if (selectedNodeId === nodeId) return;
+                    d3.select(this).select('rect')
+                        .attr('stroke', '#4a90e2')
+                        .attr('stroke-width', 2.5)
+                        .style('filter', 'drop-shadow(0 0 3px rgba(74, 144, 226, 0.5))');
+                });
+                nodeG.on('mouseleave', function() {
+                    const isHighlighted = selectedNodeId === nodeId;
+                    d3.select(this).select('rect')
+                        .attr('stroke', isHighlighted ? '#ff6b6b' : colors.stroke)
+                        .attr('stroke-width', isHighlighted ? 2.5 : 1.5)
+                        .style('filter', null);
+                });
+
+                nodeElements.set(nodeId, nodeG);
             });
-            viewport.addEventListener('mouseleave', () => {
-                if (isPanning) viewport._didPanJustNow = true;
-                isPanning = false;
-                viewport.classList.remove('panning');
+
+            requestAnimationFrame(function() {
+                fitToViewport(false);
+                renderMinimap();
             });
 
-            viewport.addEventListener('click', (e) => {
-                if (didPan) { e.preventDefault(); e.stopPropagation(); return; }
-            }, true);
+            filterNodes();
+            updateStats();
+        }
 
-            viewport._mermaidResetZoomPan = function() {
-                const vw = viewport.offsetWidth;
-                const vh = viewport.offsetHeight;
-                const diagramWrapper = viewport.querySelector('.mermaid-diagram');
-                const dw = diagramWrapper ? diagramWrapper.offsetWidth : 0;
-                const dh = diagramWrapper ? diagramWrapper.offsetHeight : 0;
-                const padding = 0.92;
-                const scaleX = vw / (dw || 1);
-                const scaleY = vh / (dh || 1);
-                scale = Math.min(scaleX, scaleY) * padding;
-                translateX = Math.max(0, (vw - dw * scale) / 2);
-                translateY = Math.max(0, (vh - dh * scale) / 2);
-                applyTransform();
-            };
+        function fitToViewport(animate) {
+            if (!d3Svg || !d3MainGroup || !d3Zoom) return;
+            const bounds = d3MainGroup.node().getBBox();
+            const svgNode = d3Svg.node();
+            const fullWidth = svgNode.clientWidth;
+            const fullHeight = svgNode.clientHeight;
+            if (bounds.width === 0 || bounds.height === 0) return;
+            var padding = 0.90;
+            var scale = padding * Math.min(fullWidth / bounds.width, fullHeight / bounds.height);
+            var tx = (fullWidth - bounds.width * scale) / 2 - bounds.x * scale;
+            var ty = (fullHeight - bounds.height * scale) / 2 - bounds.y * scale;
+            var transform = d3.zoomIdentity.translate(tx, ty).scale(scale);
+            if (animate) {
+                d3Svg.transition().duration(300).call(d3Zoom.transform, transform);
+            } else {
+                d3Svg.call(d3Zoom.transform, transform);
+            }
+        }
 
-            applyTransform();
+        function scrollToNode(nodeId) {
+            var nodeEl = nodeElements.get(nodeId);
+            if (!nodeEl || !d3Svg || !d3Zoom) return;
+            var transform = nodeEl.attr('transform');
+            var match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+            if (!match) return;
+            var nx = parseFloat(match[1]);
+            var ny = parseFloat(match[2]);
+            var nodeLayout = nodeEl.datum ? nodeEl.datum() : null;
+            var nw = 120, nh = 40;
+            var rect = nodeEl.select('rect');
+            if (!rect.empty()) {
+                nw = parseFloat(rect.attr('width')) || nw;
+                nh = parseFloat(rect.attr('height')) || nh;
+            }
+            var svgNode = d3Svg.node();
+            var fullWidth = svgNode.clientWidth;
+            var fullHeight = svgNode.clientHeight;
+            var currentTransform = d3.zoomTransform(svgNode);
+            var scale = currentTransform.k;
+            var centerX = nx + nw / 2;
+            var centerY = ny + nh / 2;
+            var tx = fullWidth / 2 - centerX * scale;
+            var ty = fullHeight / 2 - centerY * scale;
+            d3Svg.transition().duration(300).call(
+                d3Zoom.transform,
+                d3.zoomIdentity.translate(tx, ty).scale(scale)
+            );
+        }
+
+        function renderMinimap() {
+            var container = document.getElementById('minimap');
+            if (!container || !d3MainGroup || !d3Svg) return;
+            container.innerHTML = '';
+
+            var bounds = d3MainGroup.node().getBBox();
+            if (bounds.width === 0 || bounds.height === 0) return;
+
+            var mmWidth = container.clientWidth;
+            var mmHeight = container.clientHeight;
+            var pad = 4;
+            var scale = Math.min((mmWidth - pad * 2) / bounds.width, (mmHeight - pad * 2) / bounds.height);
+            var offsetX = (mmWidth - bounds.width * scale) / 2 - bounds.x * scale;
+            var offsetY = (mmHeight - bounds.height * scale) / 2 - bounds.y * scale;
+
+            var mmSvg = d3.select(container).append('svg')
+                .attr('width', mmWidth)
+                .attr('height', mmHeight);
+
+            var graphGroup = mmSvg.append('g')
+                .attr('transform', 'translate(' + offsetX + ',' + offsetY + ') scale(' + scale + ')');
+
+            d3MainGroup.selectAll('.d3-edge path.edge-line').each(function() {
+                graphGroup.append('path')
+                    .attr('d', d3.select(this).attr('d'))
+                    .attr('fill', 'none')
+                    .attr('stroke', '#555')
+                    .attr('stroke-width', 1)
+                    .attr('opacity', 0.4);
+            });
+
+            nodeElements.forEach(function(nodeEl, nodeId) {
+                var t = nodeEl.attr('transform');
+                var m = t.match(/translate\(([^,]+),\s*([^)]+)\)/);
+                if (!m) return;
+                var nx = parseFloat(m[1]);
+                var ny = parseFloat(m[2]);
+                var rect = nodeEl.select('rect');
+                var nw = rect.empty() ? 80 : parseFloat(rect.attr('width'));
+                var nh = rect.empty() ? 30 : parseFloat(rect.attr('height'));
+                var fill = rect.empty() ? '#666' : rect.attr('fill');
+                graphGroup.append('rect')
+                    .attr('x', nx).attr('y', ny)
+                    .attr('width', nw).attr('height', nh)
+                    .attr('rx', 2).attr('fill', fill)
+                    .attr('opacity', 0.8);
+            });
+
+            var viewRect = mmSvg.append('rect')
+                .attr('class', 'minimap-viewport')
+                .attr('fill', 'rgba(74, 144, 226, 0.15)')
+                .attr('stroke', '#4a90e2')
+                .attr('stroke-width', 1.5)
+                .attr('rx', 2);
+
+            updateMinimapViewport(mmSvg, viewRect, bounds, scale, offsetX, offsetY);
+
+            mmSvg.on('click', function(event) {
+                var pt = d3.pointer(event, mmSvg.node());
+                var graphX = (pt[0] - offsetX) / scale;
+                var graphY = (pt[1] - offsetY) / scale;
+                var svgNode = d3Svg.node();
+                var fw = svgNode.clientWidth;
+                var fh = svgNode.clientHeight;
+                var curT = d3.zoomTransform(svgNode);
+                var tx = fw / 2 - graphX * curT.k;
+                var ty = fh / 2 - graphY * curT.k;
+                d3Svg.transition().duration(200).call(
+                    d3Zoom.transform,
+                    d3.zoomIdentity.translate(tx, ty).scale(curT.k)
+                );
+            });
+
+            container._mmSvg = mmSvg;
+            container._viewRect = viewRect;
+            container._bounds = bounds;
+            container._scale = scale;
+            container._offsetX = offsetX;
+            container._offsetY = offsetY;
+        }
+
+        function updateMinimapViewport(mmSvg, viewRect, bounds, mmScale, offsetX, offsetY) {
+            if (!d3Svg) return;
+            var svgNode = d3Svg.node();
+            var fw = svgNode.clientWidth;
+            var fh = svgNode.clientHeight;
+            var t = d3.zoomTransform(svgNode);
+
+            var visLeft = -t.x / t.k;
+            var visTop = -t.y / t.k;
+            var visW = fw / t.k;
+            var visH = fh / t.k;
+
+            viewRect
+                .attr('x', visLeft * mmScale + offsetX)
+                .attr('y', visTop * mmScale + offsetY)
+                .attr('width', visW * mmScale)
+                .attr('height', visH * mmScale);
+        }
+
+        function syncMinimap() {
+            var container = document.getElementById('minimap');
+            if (!container || !container._mmSvg) return;
+            updateMinimapViewport(
+                container._mmSvg, container._viewRect,
+                container._bounds, container._scale,
+                container._offsetX, container._offsetY
+            );
         }
 
         function getNodeIdFromElement(el) {
             while (el && el !== document.body) {
-                const dataId = el.getAttribute && el.getAttribute('data-flow-node-id');
+                var dataId = el.getAttribute && el.getAttribute('data-node-id');
                 if (dataId) return dataId;
-                const id = el.getAttribute && el.getAttribute('id');
-                if (id && mermaidMidToNodeId) {
-                    if (mermaidMidToNodeId.has(id)) return mermaidMidToNodeId.get(id);
-                    const mid = Array.from(mermaidMidToNodeId.keys()).find(m =>
-                        id === m || id.endsWith('-' + m) || id.includes('-' + m + '-') || id.startsWith(m + '-')
-                    );
-                    if (mid !== undefined) return mermaidMidToNodeId.get(mid);
-                }
                 el = el.parentElement;
             }
             return null;
-        }
-
-        function markMermaidNodes(diagramEl) {
-            nodeIdToRootEl.clear();
-            console.log('[markMermaidNodes] start', { diagramEl: !!diagramEl, mermaidMidToNodeIdSize: mermaidMidToNodeId ? mermaidMidToNodeId.size : 0 });
-            if (!diagramEl || !mermaidMidToNodeId) return;
-            const svg = diagramEl.querySelector('svg');
-            if (!svg) {
-                console.log('[markMermaidNodes] no svg in diagramEl');
-                return;
-            }
-            const allWithId = svg.querySelectorAll('[id]');
-            let markedCount = 0;
-            allWithId.forEach(el => {
-                const id = (el.getAttribute && el.getAttribute('id')) || '';
-                const mid = mermaidMidToNodeId.has(id) ? id : Array.from(mermaidMidToNodeId.keys()).find(m => id === m || id.endsWith('-' + m) || id.includes('-' + m + '-') || id.startsWith(m + '-'));
-                if (mid !== undefined) {
-                    const nodeId = mermaidMidToNodeId.get(mid);
-                    el.setAttribute('data-flow-node-id', nodeId);
-                    el.style.pointerEvents = 'auto';
-                    markedCount++;
-                }
-            });
-            const withDataAttr = diagramEl.querySelectorAll('[data-flow-node-id]');
-            console.log('[markMermaidNodes] marked', markedCount, 'elements with data-flow-node-id, query found', withDataAttr.length);
-            function getNodeContainer(elt) {
-                let n = elt;
-                while (n && n !== svg) {
-                    const hasShape = n.querySelector && n.querySelector('rect, circle, polygon, path');
-                    if (hasShape || (n.matches && n.matches('rect, circle, polygon, path'))) return n;
-                    n = n.parentElement;
-                }
-                return elt;
-            }
-            diagramEl.querySelectorAll('[data-flow-node-id]').forEach(el => {
-                const nodeId = el.getAttribute('data-flow-node-id');
-                if (!nodeId) return;
-                let p = el.parentElement;
-                let isRoot = true;
-                while (p && p !== diagramEl) {
-                    if ((p.getAttribute && p.getAttribute('data-flow-node-id')) === nodeId) {
-                        isRoot = false;
-                        break;
-                    }
-                    p = p.parentElement;
-                }
-                if (isRoot) nodeIdToRootEl.set(nodeId, getNodeContainer(el));
-            });
-            console.log('[markMermaidNodes] nodeIdToRootEl size:', nodeIdToRootEl.size, 'keys:', Array.from(nodeIdToRootEl.keys()));
-            applyStartExitNodeColors(diagramEl);
-        }
-
-        function applyStartExitNodeColors(diagramEl) {
-            if (!diagramEl) return;
-            const svg = diagramEl.querySelector('svg');
-            if (!svg) return;
-            const isEdgePath = (el) => {
-                if (!el || !el.closest) return false;
-                const g = el.closest('g');
-                if (!g) return false;
-                const c = (g.getAttribute && g.getAttribute('class')) || '';
-                return c.includes('edgePath') || (el.closest('g[class*="edgePath"]') !== null);
-            };
-            const applyToNode = (fill, stroke, textFill, nodeId) => {
-                const marked = diagramEl.querySelectorAll('[data-flow-node-id="' + nodeId + '"]');
-                const styleShape = (shape) => {
-                    if (!shape || !shape.style) return;
-                    if (shape.tagName === 'path' && isEdgePath(shape)) return;
-                    shape.style.setProperty('fill', fill, 'important');
-                    shape.style.setProperty('stroke', stroke, 'important');
-                };
-                const styleText = (t) => {
-                    if (t && t.style) t.style.setProperty('fill', textFill, 'important');
-                };
-                marked.forEach(el => {
-                    if (el.matches && el.matches('rect, circle, polygon, path')) styleShape(el);
-                    el.querySelectorAll && el.querySelectorAll('rect, circle, polygon, path').forEach(styleShape);
-                    el.querySelectorAll && el.querySelectorAll('text, tspan').forEach(styleText);
-                });
-            };
-            applyToNode('#1b5e20', '#0d3d0d', '#ffffff', 'start');
-            applyToNode('#c75050', '#9d3a3a', '#ffffff', 'exit');
-            if (flowGraph && flowGraph.nodes) {
-                flowGraph.nodes.filter(n => n.type === 'function-step').forEach(n => {
-                    applyToNode('#7b68ee', '#5a4fcf', '#ffffff', n.id);
-                });
-            }
-        }
-
-        function getEdgeLabelText(el) {
-            const text = (el.textContent || '').trim().replace(/\s+/g, ' ');
-            return text;
-        }
-
-        function markMermaidEdgeLabels(diagramEl) {
-            if (!diagramEl || !flowGraph || !flowGraph.edges) return;
-            const svg = diagramEl.querySelector('svg');
-            if (!svg) return;
-            
-            const edgeLabels = svg.querySelectorAll('g.edgeLabel, g[class*="edgeLabel"], g[id*="edgeLabel"], g[class*="edge-label"], g[id*="L-"], g[class*="flowchart-edgeLabel"]');
-            
-            edgeLabels.forEach((el, idx) => {
-                el.setAttribute('data-edge-label', 'true');
-                const labelText = getEdgeLabelText(el);
-                if (!labelText) return;
-                
-                // Find the matching edge by label text
-                const edge = flowGraph.edges.find(e => {
-                    const edgeLabel = (e.label || '').trim().replace(/\s+/g, ' ');
-                    return edgeLabel === labelText || labelText.indexOf(edgeLabel) >= 0 || edgeLabel.indexOf(labelText) >= 0;
-                });
-                
-                if (edge) {
-                    // Apply yellow styling directly to condition edge labels
-                    if (edge.type === 'condition') {
-                        el.setAttribute('data-edge-type', 'condition');
-                        
-                        // Target the span.edgeLabel inside foreignObject
-                        const edgeLabelSpan = el.querySelector('span.edgeLabel');
-                        if (edgeLabelSpan) {
-                            // Style the span with yellow background and text
-                            edgeLabelSpan.style.setProperty('background-color', '#854d0e', 'important');
-                            edgeLabelSpan.style.setProperty('color', '#fef08a', 'important');
-                        }
-                    }
-                    
-                    // Mark edges with function paths as clickable
-                    if (edge.functionFilePath) {
-                        el.setAttribute('data-function-path', edge.functionFilePath);
-                        el.style.cursor = 'pointer';
-                    }
-                }
-            });
-        }
-
-        function getClosestNodeEl(el) {
-            while (el && el !== document.body) {
-                if (el.getAttribute && el.getAttribute('data-flow-node-id')) return el;
-                el = el.parentElement;
-            }
-            return null;
-        }
-
-        function getClosestEdgeLabelEl(el) {
-            while (el && el !== document.body) {
-                if (el.getAttribute && el.getAttribute('data-edge-label')) return el;
-                el = el.parentElement;
-            }
-            return null;
-        }
-
-        function getEdgeLabelFunctionPath(el) {
-            const labelEl = getClosestEdgeLabelEl(el);
-            return labelEl && labelEl.getAttribute ? labelEl.getAttribute('data-function-path') : null;
-        }
-
-        function setupDiagramHover(viewport) {
-            let lastNodeEl = null;
-            let lastEdgeLabelEl = null;
-            function updateHover(target) {
-                const networkEl = document.getElementById('network');
-                if (!networkEl || !target || !networkEl.contains(target)) {
-                    if (lastNodeEl) {
-                        lastNodeEl.classList.remove('mermaid-node-hover');
-                        lastNodeEl = null;
-                    }
-                    if (lastEdgeLabelEl) {
-                        lastEdgeLabelEl.classList.remove('mermaid-edge-label-hover');
-                        lastEdgeLabelEl = null;
-                    }
-                    return;
-                }
-                const nodeEl = getClosestNodeEl(target);
-                const edgeLabelEl = getClosestEdgeLabelEl(target);
-                if (lastNodeEl && lastNodeEl !== nodeEl) {
-                    lastNodeEl.classList.remove('mermaid-node-hover');
-                    lastNodeEl = null;
-                }
-                if (lastEdgeLabelEl && lastEdgeLabelEl !== edgeLabelEl) {
-                    lastEdgeLabelEl.classList.remove('mermaid-edge-label-hover');
-                    lastEdgeLabelEl = null;
-                }
-                if (nodeEl) {
-                    nodeEl.classList.add('mermaid-node-hover');
-                    lastNodeEl = nodeEl;
-                }
-                if (edgeLabelEl) {
-                    edgeLabelEl.classList.add('mermaid-edge-label-hover');
-                    lastEdgeLabelEl = edgeLabelEl;
-                }
-            }
-            document.addEventListener('mousemove', (e) => { updateHover(e.target); }, true);
-            document.addEventListener('mouseout', (e) => {
-                const networkEl = document.getElementById('network');
-                if (networkEl && networkEl.contains(e.target) && (!e.relatedTarget || !networkEl.contains(e.relatedTarget))) {
-                    updateHover(null);
-                }
-            }, true);
-        }
-
-        function setupDiagramClickHandler() {
-            if (window._diagramClickHandlerAttached) return;
-            window._diagramClickHandlerAttached = true;
-            document.addEventListener('click', (e) => {
-                const networkEl = document.getElementById('network');
-                if (!networkEl || !networkEl.contains(e.target)) return;
-                const viewport = networkEl.querySelector('.mermaid-viewport');
-                if (viewport && viewport._didPanJustNow) {
-                    viewport._didPanJustNow = false;
-                    return;
-                }
-                const nodeId = getNodeIdFromElement(e.target);
-                if (nodeId) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const node = flowGraph && flowGraph.nodes.find(n => n.id === nodeId);
-                    if (node) {
-                        selectedNodeId = nodeId;
-                        highlightNode(nodeId);
-                        showDetails(node);
-                    }
-                    return;
-                }
-                const functionPath = getEdgeLabelFunctionPath(e.target);
-                if (functionPath) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    vscode.postMessage({ command: 'openFunction', filePath: functionPath });
-                    return;
-                }
-                clearSelection();
-                closeDetails();
-            }, true);
-        }
-
-        function getNodeShape(type) {
-            switch (type) {
-                case 'step':
-                    return 'box';
-                case 'function':
-                case 'function-step':
-                    return 'ellipse';
-                case 'end':
-                case 'exit':
-                    return 'diamond';
-                default:
-                    return 'box';
-            }
-        }
-
-        function getNodeColor(type) {
-            switch (type) {
-                case 'step':
-                    return { background: '#4a90e2', border: '#2e5c8a' };
-                case 'function':
-                case 'function-step':
-                    return { background: '#7b68ee', border: '#5a4fcf' };
-                case 'end':
-                    return { background: '#1b5e20', border: '#0d3d0d' }; /* start node badge */
-                case 'exit':
-                    return { background: '#c75050', border: '#9d3a3a' };
-                default:
-                    return { background: '#848484', border: '#666' };
-            }
         }
 
         // Store original node data for change tracking
@@ -1888,8 +2193,7 @@
                         selectedNodeId = nodeId;
                         highlightNode(nodeId);
                         showDetails(node);
-                        const el = mermaidDiagramEl && mermaidDiagramEl.querySelector('[data-flow-node-id="' + CSS.escape(nodeId) + '"]');
-                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            scrollToNode(nodeId);
                     }
                 };
                 
@@ -5165,10 +5469,7 @@
         }
 
         function fitNetwork() {
-            const viewport = document.querySelector('#network .mermaid-viewport');
-            if (viewport && typeof viewport._mermaidResetZoomPan === 'function') {
-                viewport._mermaidResetZoomPan();
-            }
+            fitToViewport(true);
         }
 
         function focusStartNode() {
@@ -5178,8 +5479,7 @@
                     selectedNodeId = 'start';
                     highlightNode('start');
                     showDetails(node);
-                    const el = mermaidDiagramEl && mermaidDiagramEl.querySelector('[data-flow-node-id="start"]');
-                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    scrollToNode('start');
                 }
             }
         }
@@ -5200,110 +5500,65 @@
 
         function highlightNode(nodeId) {
             clearHighlights();
-            if (!mermaidDiagramEl || !nodeId) return;
-            const el = mermaidDiagramEl.querySelector('[data-flow-node-id="' + CSS.escape(nodeId) + '"]');
-            if (el) el.classList.add('mermaid-node-highlighted');
+            if (!nodeId) return;
+            var nodeEl = nodeElements.get(nodeId);
+            if (nodeEl) {
+                nodeEl.classed('highlighted', true);
+                nodeEl.select('rect')
+                    .attr('stroke', '#ff6b6b')
+                    .attr('stroke-width', 2.5);
+            }
         }
 
         function focusNode(nodeId) {
             if (!flowGraph || !nodeId) return;
-            const node = flowGraph.nodes.find(n => n.id === nodeId);
+            var node = flowGraph.nodes.find(function(n) { return n.id === nodeId; });
             if (node) {
                 selectedNodeId = nodeId;
                 highlightNode(nodeId);
                 showDetails(node);
-                const el = mermaidDiagramEl && mermaidDiagramEl.querySelector('[data-flow-node-id="' + CSS.escape(nodeId) + '"]');
-                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                scrollToNode(nodeId);
             }
         }
 
         function highlightConnectedNodes(nodeId) {
-            // Optional: dim non-connected; kept for API compatibility
         }
 
         function clearHighlights() {
-            if (mermaidDiagramEl) {
-                mermaidDiagramEl.querySelectorAll('.mermaid-node-highlighted').forEach(el => el.classList.remove('mermaid-node-highlighted'));
-                mermaidDiagramEl.querySelectorAll('.mermaid-node-dimmed').forEach(el => el.classList.remove('mermaid-node-dimmed'));
-            }
-            nodeIdToRootEl.forEach(el => {
-                if (el && el.style) el.style.removeProperty('opacity');
+            nodeElements.forEach(function(nodeEl, nodeId) {
+                if (!flowGraph) return;
+                var node = flowGraph.nodes.find(function(n) { return n.id === nodeId; });
+                if (!node) return;
+                var colors = getNodeColor(node.type);
+                nodeEl.classed('highlighted', false);
+                nodeEl.classed('dimmed', false);
+                nodeEl.select('rect')
+                    .attr('stroke', colors.stroke)
+                    .attr('stroke-width', 1.5)
+                    .style('filter', null);
             });
-        }
-
-        function ensureNodeIdToRootEl() {
-            if (nodeIdToRootEl.size > 0) return;
-            const diagramEl = document.querySelector('#network .mermaid-diagram');
-            if (!diagramEl || !mermaidMidToNodeId) return;
-            const svg = diagramEl.querySelector('svg');
-            if (!svg) return;
-            function getNodeContainer(elt) {
-                let n = elt;
-                while (n && n !== svg) {
-                    const hasShape = n.querySelector && n.querySelector('rect, circle, polygon, path');
-                    if (hasShape || (n.matches && n.matches('rect, circle, polygon, path'))) return n;
-                    n = n.parentElement;
-                }
-                return elt;
-            }
-            const allWithId = svg.querySelectorAll('[id]');
-            const byNodeId = new Map();
-            allWithId.forEach(el => {
-                const id = (el.getAttribute && el.getAttribute('id')) || '';
-                const mid = mermaidMidToNodeId.has(id) ? id : Array.from(mermaidMidToNodeId.keys()).find(m => id === m || id.endsWith('-' + m) || id.includes('-' + m + '-') || id.startsWith(m + '-'));
-                if (mid !== undefined) {
-                    const nodeId = mermaidMidToNodeId.get(mid);
-                    if (!byNodeId.has(nodeId)) byNodeId.set(nodeId, []);
-                    byNodeId.get(nodeId).push(el);
-                }
-            });
-            byNodeId.forEach((elements, nodeId) => {
-                const roots = elements.filter(el => !elements.some(other => other !== el && other.contains(el)));
-                if (roots.length > 0) nodeIdToRootEl.set(nodeId, getNodeContainer(roots[0]));
-            });
-            console.log('[ensureNodeIdToRootEl] built map from DOM', { size: nodeIdToRootEl.size, keys: Array.from(nodeIdToRootEl.keys()) });
         }
 
         function filterNodes() {
-            const searchBox = document.getElementById('search-box');
-            const rawValue = searchBox ? searchBox.value : '';
-            const searchTerm = (rawValue || '').replace(/^["']|["']$/g, '').trim().toLowerCase();
-            console.log('[filterNodes] called', { searchBoxFound: !!searchBox, rawValue: JSON.stringify(rawValue), searchTerm: JSON.stringify(searchTerm), flowGraph: !!flowGraph, nodeCount: flowGraph ? flowGraph.nodes.length : 0, nodeIdToRootElSize: nodeIdToRootEl.size });
-            if (!flowGraph) {
-                console.log('[filterNodes] early return: no flowGraph');
-                return;
-            }
-            ensureNodeIdToRootEl();
+            var searchBox = document.getElementById('search-box');
+            var rawValue = searchBox ? searchBox.value : '';
+            var searchTerm = (rawValue || '').replace(/^["']|["']$/g, '').trim().toLowerCase();
+            if (!flowGraph) return;
+
             if (searchTerm === '') {
-                console.log('[filterNodes] clearing dim (empty search), map size:', nodeIdToRootEl.size);
-                nodeIdToRootEl.forEach(el => {
-                    if (el && el.style) {
-                        el.style.removeProperty('opacity');
-                        el.classList.remove('mermaid-node-dimmed');
-                    }
+                nodeElements.forEach(function(nodeEl) {
+                    nodeEl.classed('dimmed', false).style('opacity', null);
                 });
                 return;
             }
-            let dimmed = 0, shown = 0, noRoot = 0;
-            flowGraph.nodes.forEach(flowNode => {
-                const matches = flowNode.label.toLowerCase().includes(searchTerm) ||
+
+            flowGraph.nodes.forEach(function(flowNode) {
+                var nodeEl = nodeElements.get(flowNode.id);
+                if (!nodeEl) return;
+                var matches = flowNode.label.toLowerCase().includes(searchTerm) ||
                     (flowNode.details && flowNode.details.toLowerCase().includes(searchTerm));
-                const rootEl = nodeIdToRootEl.get(flowNode.id);
-                if (!rootEl) {
-                    noRoot++;
-                    return;
-                }
-                if (matches) {
-                    rootEl.style.removeProperty('opacity');
-                    rootEl.classList.remove('mermaid-node-dimmed');
-                    shown++;
-                } else {
-                    rootEl.style.setProperty('opacity', '0.2', 'important');
-                    rootEl.classList.add('mermaid-node-dimmed');
-                    dimmed++;
-                }
+                nodeEl.classed('dimmed', !matches).style('opacity', matches ? null : 0.2);
             });
-            console.log('[filterNodes] done', { searchTerm: JSON.stringify(searchTerm), dimmed, shown, noRoot, mapKeys: Array.from(nodeIdToRootEl.keys()) });
         }
 
         function updateStats() {
@@ -5317,32 +5572,17 @@
             }
         }
 
-        function initMermaidAndReady() {
-            if (typeof mermaid !== 'undefined') {
-                mermaid.initialize({
-                    startOnLoad: false,
-                    securityLevel: 'loose',
-                    theme: 'base',
-                    themeVariables: {
-                        primaryColor: '#4a90e2',
-                        primaryBorderColor: '#2e5c8a',
-                        primaryTextColor: '#ffffff',
-                        lineColor: '#4a4a4a',
-                        secondaryColor: '#6b7280',
-                        tertiaryColor: '#6b7280',
-                        tertiaryBorderColor: '#4b5563',
-                        tertiaryTextColor: '#ffffff'
-                    }
-                });
+        function initD3AndReady() {
+            if (typeof d3 !== 'undefined' && typeof dagre !== 'undefined') {
                 vscode.postMessage({ command: 'ready' });
             } else {
-                setTimeout(initMermaidAndReady, 100);
+                setTimeout(initD3AndReady, 100);
             }
         }
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initMermaidAndReady);
+            document.addEventListener('DOMContentLoaded', initD3AndReady);
         } else {
-            initMermaidAndReady();
+            initD3AndReady();
         }
         document.addEventListener('DOMContentLoaded', () => {
             const searchBox = document.getElementById('search-box');

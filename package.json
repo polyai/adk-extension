@@ -61,8 +61,9 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "yarn run package",
-    "compile": "webpack",
+    "vscode:prepublish": "yarn run copy-libs && yarn run package",
+    "copy-libs": "mkdir -p src/lib && cp node_modules/d3/dist/d3.min.js src/lib/ && cp node_modules/dagre/dist/dagre.min.js src/lib/",
+    "compile": "yarn run copy-libs && webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
@@ -73,6 +74,8 @@
     "semantic-release": "semantic-release"
   },
   "dependencies": {
+    "d3": "^7.9.0",
+    "dagre": "^0.8.5",
     "js-yaml": "^4.1.0"
   },
   "devDependencies": {
