@@ -319,9 +319,21 @@ export class FlowParser {
 			}
 		}
 
+		// Deduplicate edges: same from+to+label should only appear once
+		const edgeKey = (e: FlowEdge) => `${e.from}|${e.to}|${e.label}`;
+		const seen = new Set<string>();
+		const uniqueEdges: FlowEdge[] = [];
+		for (const edge of edges) {
+			const key = edgeKey(edge);
+			if (!seen.has(key)) {
+				seen.add(key);
+				uniqueEdges.push(edge);
+			}
+		}
+
 		return { 
 			nodes, 
-			edges, 
+			edges: uniqueEdges, 
 			config,
 			flowFunctions: Array.from(flowFunctions.entries()).map(([name, info]) => ({
 				name,
@@ -656,22 +668,31 @@ export class FlowParser {
 		const transitions: Array<{ type: 'function' | 'flow-function' | 'step'; target: string; condition?: string }> = [];
 
 		// Match {{fn:function_name}} or {{fn:function_name}}('param') - global functions
+		const seenTargets = new Set<string>();
 		const fnRegex = /\{\{fn:(\w+)\}\}(?:\([^)]*\))?/g;
 		let match;
 		while ((match = fnRegex.exec(prompt)) !== null) {
-			transitions.push({
-				type: 'function',
-				target: match[1]
-			});
+			const key = `function:${match[1]}`;
+			if (!seenTargets.has(key)) {
+				seenTargets.add(key);
+				transitions.push({
+					type: 'function',
+					target: match[1]
+				});
+			}
 		}
 
 		// Match {{ft:function_name}} - flow functions
 		const ftRegex = /\{\{ft:(\w+)\}\}/g;
 		while ((match = ftRegex.exec(prompt)) !== null) {
-			transitions.push({
-				type: 'flow-function',
-				target: match[1]
-			});
+			const key = `flow-function:${match[1]}`;
+			if (!seenTargets.has(key)) {
+				seenTargets.add(key);
+				transitions.push({
+					type: 'flow-function',
+					target: match[1]
+				});
+			}
 		}
 
 		// Try to extract conditions from markdown bold text before transitions

@@ -62,7 +62,7 @@
   },
   "scripts": {
     "vscode:prepublish": "yarn run copy-libs && yarn run package",
-    "copy-libs": "mkdir -p src/lib && cp node_modules/d3/dist/d3.min.js src/lib/ && cp node_modules/dagre/dist/dagre.min.js src/lib/",
+    "copy-libs": "mkdir -p src/lib && cp node_modules/@joint/core/dist/joint.min.js src/lib/ && cp node_modules/@dagrejs/dagre/dist/dagre.min.js src/lib/ && cp node_modules/@dagrejs/graphlib/dist/graphlib.min.js src/lib/ && cp node_modules/@joint/layout-directed-graph/dist/DirectedGraph.min.js src/lib/ && cp node_modules/@msagl/core/dist.min.js src/lib/msagl-core.min.js && cp node_modules/@joint/layout-msagl/dist/umd/index.min.js src/lib/msagl-layout.min.js",
     "compile": "yarn run copy-libs && webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
@@ -74,8 +74,10 @@
     "semantic-release": "semantic-release"
   },
   "dependencies": {
-    "d3": "^7.9.0",
-    "dagre": "^0.8.5",
+    "@joint/core": "^4.2.4",
+    "@joint/layout-directed-graph": "^4.2.3",
+    "@joint/layout-msagl": "^4.2.3",
+    "@joint/layout-msagl": "^4.2.3",
     "js-yaml": "^4.1.0"
   },
   "devDependencies": {

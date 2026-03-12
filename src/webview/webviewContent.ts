@@ -11,10 +11,18 @@ export function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.
 	let htmlContent = fs.readFileSync(htmlPath, 'utf8');
 
 	// Replace CDN script URLs with local webview URIs for offline support
-	const d3Uri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'd3.min.js')));
+	const jointUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'joint.min.js')));
+	const graphlibUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'graphlib.min.js')));
 	const dagreUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'dagre.min.js')));
-	htmlContent = htmlContent.replace('https://unpkg.com/d3@7/dist/d3.min.js', d3Uri.toString());
-	htmlContent = htmlContent.replace('https://unpkg.com/dagre@0.8.5/dist/dagre.min.js', dagreUri.toString());
+	const directedGraphUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'DirectedGraph.min.js')));
+	const msaglCoreUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'msagl-core.min.js')));
+	const msaglLayoutUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'msagl-layout.min.js')));
+	htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@joint/core/dist/joint.min.js', jointUri.toString());
+	htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@dagrejs/graphlib/dist/graphlib.min.js', graphlibUri.toString());
+	htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@dagrejs/dagre/dist/dagre.min.js', dagreUri.toString());
+	htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@joint/layout-directed-graph/dist/DirectedGraph.min.js', directedGraphUri.toString());
+	htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@msagl/core/dist.min.js', msaglCoreUri.toString());
+	htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@joint/layout-msagl/dist/umd/index.min.js', msaglLayoutUri.toString());
 	
 	// Add CSP meta tag if not present
 	const cspSource = webview.cspSource;
