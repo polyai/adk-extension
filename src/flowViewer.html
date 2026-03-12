@@ -8,8 +8,6 @@
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@dagrejs/graphlib/dist/graphlib.min.js"></script>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@dagrejs/dagre/dist/dagre.min.js"></script>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@joint/layout-directed-graph/dist/DirectedGraph.min.js"></script>
-    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@msagl/core/dist.min.js"></script>
-    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@joint/layout-msagl/dist/umd/index.min.js"></script>
     <style>
         body {
             margin: 0;
@@ -1236,20 +1234,20 @@
             NodeVerticalPadding: 10,
             NodeLabelFontSize: 13,
             NodeLabelFontWeight: 500,
-            EdgeColor: '#6B7280',
+            EdgeColor: '#D8DDE4',
             EdgeWidth: 2,
-            EdgeLabelFontSize: 11,
-            EdgeLabelColor: '#E5E7EB',
-            EdgeLabelBackgroundColor: '#1F2937',
-            EdgeLabelBorderColor: '#4B5563',
+            EdgeLabelFontSize: 13,
+            EdgeLabelColor: '#1F2433',
+            EdgeLabelBackgroundColor: '#EFFDF6',
+            EdgeLabelBorderColor: '#CFCFCF',
             EdgeLabelHorizontalPadding: 10,
-            EdgeLabelVerticalPadding: 5,
-            ConditionLabelColor: '#FEF08A',
-            ConditionLabelBackgroundColor: '#78350F',
-            ConditionLabelBorderColor: '#A16207',
-            SelectionColor: '#3B82F6',
+            EdgeLabelVerticalPadding: 6,
+            ConditionLabelColor: '#1F2433',
+            ConditionLabelBackgroundColor: '#EFFDF6',
+            ConditionLabelBorderColor: '#CFCFCF',
+            SelectionColor: '#3F4EDA',
             HoverColor: '#60A5FA',
-            ArrowColor: '#6B7280'
+            ArrowColor: '#D8DDE4'
         };
 
         function getNodeColor(type) {
@@ -1332,7 +1330,6 @@
             jointGraph = new joint.dia.Graph({}, { cellNamespace: joint.shapes });
 
             var isLR = currentLayoutDirection === 'LR';
-            var useMSAGL = !!(joint.layout && joint.layout.MSAGL && joint.layout.MSAGL.layout);
             var sourceAnchor = isLR ? { name: 'right' } : { name: 'bottom' };
             var targetAnchor = isLR ? { name: 'left' } : { name: 'top' };
 
@@ -1383,6 +1380,9 @@
                     }
                 });
                 el.resize(size.w, size.h);
+                var elementSize = { width: size.w, height: size.h };
+                el.set('labelSize', elementSize);
+                el.prop('data/labelSize', elementSize);
                 el.prop('nodeData', node);
                 el.addTo(jointGraph);
                 nodeMap[node.id] = el;
@@ -1416,18 +1416,18 @@
                             width: 'calc(w + ' + (2 * Theme.EdgeLabelHorizontalPadding) + ')',
                             height: 'calc(h + ' + (2 * Theme.EdgeLabelVerticalPadding) + ')'
                         }
-                    }
-                };
-                if (!useMSAGL) {
-                    defaultLabel.position = {
+                    },
+                    position: {
                         distance: 0.4,
                         offset: 0,
                         args: { keepGradient: false, ensureLegibility: true }
-                    };
-                }
+                    }
+                };
                 var linkConfig = {
-                    source: { id: sourceEl.id },
-                    target: { id: targetEl.id },
+                    source: { id: sourceEl.id, anchor: sourceAnchor },
+                    target: { id: targetEl.id, anchor: targetAnchor },
+                    router: { name: 'orthogonal', args: { padding: 15 } },
+                    connector: { name: 'rounded', args: { radius: 8 } },
                     attrs: {
                         line: {
                             stroke: Theme.EdgeColor,
@@ -1442,12 +1442,6 @@
                     },
                     defaultLabel: defaultLabel
                 };
-                if (!useMSAGL) {
-                    linkConfig.source.anchor = sourceAnchor;
-                    linkConfig.target.anchor = targetAnchor;
-                    linkConfig.router = { name: 'orthogonal', args: { padding: 15 } };
-                    linkConfig.connector = { name: 'rounded', args: { radius: 8 } };
-                }
                 var link = new joint.shapes.standard.Link(linkConfig);
 
                 if (labelText) {
@@ -1467,77 +1461,21 @@
                     var ctx = canvas.getContext('2d');
                     ctx.font = Theme.EdgeLabelFontSize + 'px ' + Theme.FontFamily;
                     var textW = ctx.measureText(labelText).width;
-                    var labelSize = {
-                        width: textW + Theme.EdgeLabelHorizontalPadding * 2 + 4,
-                        height: Theme.EdgeLabelFontSize + Theme.EdgeLabelVerticalPadding * 2 + 4
-                    };
-                    link.set('labelSize', labelSize);
-                    if (useMSAGL && console && console.log) {
-                        console.log('[MSAGL labelSize] Set on link at creation:', { label: labelText, size: labelSize, linkId: link.id });
-                    }
+                    var labelW = textW + Theme.EdgeLabelHorizontalPadding * 2 + 4;
+                    var labelH = Theme.EdgeLabelFontSize + Theme.EdgeLabelVerticalPadding * 2 + 4;
+                    var linkLabelSize = { width: labelW, height: labelH };
+                    link.set('labelSize', linkLabelSize);
+                    link.prop('data/labelSize', linkLabelSize);
                 }
 
                 link.prop('edgeData', edge);
                 link.addTo(jointGraph);
             });
 
-            if (useMSAGL) {
-                var MSAGL = joint.layout.MSAGL;
-                var linksWithLabelSize = jointGraph.getLinks().filter(function(l) { return l.get('labelSize'); });
-                if (console && console.log) {
-                    console.log('[MSAGL labelSize] Before layout: links with labelSize =', linksWithLabelSize.length, 'of', jointGraph.getLinks().length, linksWithLabelSize.map(function(l) { return { id: l.id, labelSize: l.get('labelSize') }; }));
-                }
-                MSAGL.layout(jointGraph, {
-                    layerDirection: isLR
-                        ? MSAGL.LayerDirectionEnum.LR
-                        : MSAGL.LayerDirectionEnum.TB,
-                    layerSeparation: 120,
-                    nodeSeparation: 30,
-                    polylinePadding: 10,
-                    edgeRoutingMode: MSAGL.EdgeRoutingMode.Rectilinear,
-                    x: 20,
-                    y: 20,
-                    setVertices: true,
-                    setLabels: true,
-                    setAnchor: true,
-                    getLabelSize: function(cell) {
-                        if (cell.isElement()) return undefined;
-                        var labelSize = cell.get('labelSize');
-                        if (labelSize && labelSize.width != null && labelSize.height != null) {
-                            if (console && console.log) {
-                                console.log('[MSAGL labelSize] getLabelSize used stored labelSize:', { linkId: cell.id, size: labelSize });
-                            }
-                            return labelSize;
-                        }
-                        var text = cell.attr('label/text') || cell.attr('label/0/attrs/text/text');
-                        if (text == null && cell.label) {
-                            var firstLabel = cell.label(0);
-                            text = firstLabel && firstLabel.attrs && firstLabel.attrs.text && firstLabel.attrs.text.text;
-                        }
-                        if (!text) {
-                            if (console && console.log) {
-                                console.log('[MSAGL labelSize] getLabelSize no label text, returning undefined:', { linkId: cell.id });
-                            }
-                            return undefined;
-                        }
-                        var canvas = document.createElement('canvas');
-                        var ctx = canvas.getContext('2d');
-                        ctx.font = Theme.EdgeLabelFontSize + 'px ' + Theme.FontFamily;
-                        var textW = ctx.measureText(text).width;
-                        var computed = {
-                            width: textW + Theme.EdgeLabelHorizontalPadding * 2 + 4,
-                            height: Theme.EdgeLabelFontSize + Theme.EdgeLabelVerticalPadding * 2 + 4
-                        };
-                        if (console && console.log) {
-                            console.log('[MSAGL labelSize] getLabelSize computed from text:', { linkId: cell.id, label: text, size: computed });
-                        }
-                        return computed;
-                    }
-                });
-            } else if (typeof joint.layout !== 'undefined' && joint.layout.DirectedGraph) {
+            if (typeof joint.layout !== 'undefined' && joint.layout.DirectedGraph) {
                 joint.layout.DirectedGraph.layout(jointGraph, {
                     rankDir: currentLayoutDirection,
-                    rankSep: isLR ? 60 : 55,
+                    rankSep: isLR ? 40 : 35,
                     nodeSep: isLR ? 30 : 35,
                     edgeSep: 15,
                     marginX: 30,
@@ -1932,17 +1870,11 @@
         function updateToolbarPosition() {
             const panel = document.getElementById('modified-nodes-panel');
             const toolbar = document.getElementById('toolbar');
-            if (panel && toolbar) {
-                if (panel.classList.contains('visible')) {
-                    if (panel.classList.contains('collapsed')) {
-                        toolbar.style.left = '40px';
-                    } else {
-                        toolbar.style.left = '260px';
-                    }
-                } else {
-                    toolbar.style.left = '10px';
-                }
+            var left = '10px';
+            if (panel && panel.classList.contains('visible')) {
+                left = panel.classList.contains('collapsed') ? '40px' : '260px';
             }
+            if (toolbar) toolbar.style.left = left;
         }
 
         /**
@@ -5240,7 +5172,7 @@
         }
 
         function initJointAndReady() {
-            if (typeof joint !== 'undefined' && joint.layout && joint.layout.MSAGL) {
+            if (typeof joint !== 'undefined' && joint.layout && joint.layout.DirectedGraph) {
                 vscode.postMessage({ command: 'ready' });
             } else if (typeof joint !== 'undefined') {
                 setTimeout(initJointAndReady, 50);

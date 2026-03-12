@@ -4993,14 +4993,10 @@ function getWebviewContent(webview, extensionUri) {
     const graphlibUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'graphlib.min.js')));
     const dagreUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'dagre.min.js')));
     const directedGraphUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'DirectedGraph.min.js')));
-    const msaglCoreUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'msagl-core.min.js')));
-    const msaglLayoutUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'msagl-layout.min.js')));
     htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@joint/core/dist/joint.min.js', jointUri.toString());
     htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@dagrejs/graphlib/dist/graphlib.min.js', graphlibUri.toString());
     htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@dagrejs/dagre/dist/dagre.min.js', dagreUri.toString());
     htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@joint/layout-directed-graph/dist/DirectedGraph.min.js', directedGraphUri.toString());
-    htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@msagl/core/dist.min.js', msaglCoreUri.toString());
-    htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@joint/layout-msagl/dist/umd/index.min.js', msaglLayoutUri.toString());
     // Add CSP meta tag if not present
     const cspSource = webview.cspSource;
     const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${cspSource} 'unsafe-inline' 'unsafe-eval'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource} https: data:; font-src ${cspSource} https: data:;">`;
