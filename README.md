@@ -106,11 +106,20 @@ ADK: View Flow    # From command palette (Ctrl+Shift+P / Cmd+Shift+P)
 
 Or right-click on a flow directory in the Explorer and select "View Flow".
 
+### Creating a Flow
+
+```
+ADK: Create New Flow    # From command palette (Ctrl+Shift+P / Cmd+Shift+P)
+```
+
+Or right-click on a folder in the Explorer (e.g. your `flows` directory) and select "ADK: Create New Flow". Enter a name for the flow; the extension creates a new flow directory with `flow_config.yaml` and an initial step, then opens the flow viewer.
+
 ### Commands
 
 | Command | Description |
 |---------|-------------|
 | `ADK: View Flow` | Open the flow viewer for a selected flow directory |
+| `ADK: Create New Flow` | Create a new flow directory with config and initial step, then open the flow viewer |
 | `ADK: Toggle Debug Mode` | Enable or disable debug logging |
 
 ### Keyboard Shortcuts
