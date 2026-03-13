@@ -32,6 +32,11 @@
         "icon": "$(graph)"
       },
       {
+        "command": "adk-extension.createFlow",
+        "title": "ADK: Create New Flow",
+        "icon": "$(new-folder)"
+      },
+      {
         "command": "adk-extension.toggleDebugMode",
         "title": "ADK: Toggle Debug Mode",
         "icon": "$(debug)"
@@ -44,12 +49,23 @@
           "when": "explorerResourceIsFolder",
           "group": "navigation",
           "icon": "$(graph)"
+        },
+        {
+          "command": "adk-extension.createFlow",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation",
+          "icon": "$(new-folder)"
         }
       ],
       "commandPalette": [
         {
           "command": "adk-extension.viewFlow",
           "title": "ADK: View Flow",
+          "category": "Agent Development Kit Extension"
+        },
+        {
+          "command": "adk-extension.createFlow",
+          "title": "ADK: Create New Flow",
           "category": "Agent Development Kit Extension"
         },
         {

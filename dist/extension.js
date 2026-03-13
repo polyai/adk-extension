@@ -54,6 +54,66 @@ const webviewHandlers_1 = __webpack_require__(31);
 const pythonLanguageFeatures_1 = __webpack_require__(33);
 const debug_1 = __webpack_require__(35);
 const linter_1 = __webpack_require__(36);
+function toSnakeCase(str) {
+    return str
+        .replace(/([a-z])([A-Z])/g, '$1_$2')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+        .replace(/[\s\-]+/g, '_')
+        .replace(/[^a-zA-Z0-9_]/g, '')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '')
+        .toLowerCase();
+}
+async function openFlowViewer(flowDir, context) {
+    const configPath = path.join(flowDir, 'flow_config.yaml');
+    if (!fs.existsSync(configPath)) {
+        vscode.window.showErrorMessage(`Flow directory must contain a flow_config.yaml file.\nSelected: ${flowDir}`, 'OK');
+        return;
+    }
+    if (!fs.statSync(flowDir).isDirectory()) {
+        vscode.window.showErrorMessage(`Selected path is not a directory: ${flowDir}`);
+        return;
+    }
+    let flowName = path.basename(flowDir);
+    try {
+        const configContent = fs.readFileSync(configPath, 'utf8');
+        const config = yaml.load(configContent);
+        if (config && config.name) {
+            flowName = config.name;
+        }
+    }
+    catch {
+        // Use directory name if config parsing fails
+    }
+    const panel = vscode.window.createWebviewPanel('flowViewer', `Flow Viewer: ${flowName}`, vscode.ViewColumn.One, {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [
+            vscode.Uri.file(path.join(context.extensionPath, 'src'))
+        ],
+        enableCommandUris: true
+    });
+    const messageHandler = new webviewHandlers_1.WebviewMessageHandler(panel, flowDir);
+    panel.webview.onDidReceiveMessage(async (message) => {
+        await messageHandler.handleMessage(message);
+    }, undefined, context.subscriptions);
+    panel.webview.html = (0, webviewContent_1.getWebviewContent)(panel.webview, context.extensionUri);
+    try {
+        const parser = new flowParser_1.FlowParser(flowDir);
+        const flowGraph = await parser.parseFlow();
+        messageHandler.setFlowGraphData(flowGraph);
+        panel.webview.postMessage({
+            command: 'loadFlow',
+            flowGraph: flowGraph
+        });
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Error parsing flow: ${errorMessage}`, 'OK');
+        console.error('Flow parsing error:', error);
+        panel.webview.html = (0, webviewContent_1.getErrorWebviewContent)(errorMessage);
+    }
+}
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 function activate(context) {
@@ -69,22 +129,18 @@ function activate(context) {
         let flowDir;
         if (uri && uri.fsPath) {
             flowDir = uri.fsPath;
-            // If a file was selected, get its directory
             if (!fs.statSync(flowDir).isDirectory()) {
                 flowDir = path.dirname(flowDir);
             }
         }
         else {
-            // If no URI provided, try to use the workspace folder
             const workspaceFolders = vscode.workspace.workspaceFolders;
             if (workspaceFolders && workspaceFolders.length > 0) {
-                // Check if workspace root has flow_config.yaml
                 const workspaceRoot = workspaceFolders[0].uri.fsPath;
                 if (fs.existsSync(path.join(workspaceRoot, 'flow_config.yaml'))) {
                     flowDir = workspaceRoot;
                 }
                 else {
-                    // Ask user to select a folder
                     const selectedFolders = await vscode.window.showOpenDialog({
                         canSelectFiles: false,
                         canSelectFolders: true,
@@ -92,90 +148,95 @@ function activate(context) {
                         openLabel: 'Select Flow Directory',
                         defaultUri: vscode.Uri.file(workspaceRoot)
                     });
-                    if (!selectedFolders || selectedFolders.length === 0) {
+                    if (!selectedFolders || selectedFolders.length === 0)
                         return;
-                    }
                     flowDir = selectedFolders[0].fsPath;
                 }
             }
             else {
-                // Ask user to select a folder
                 const selectedFolders = await vscode.window.showOpenDialog({
                     canSelectFiles: false,
                     canSelectFolders: true,
                     canSelectMany: false,
                     openLabel: 'Select Flow Directory'
                 });
-                if (!selectedFolders || selectedFolders.length === 0) {
+                if (!selectedFolders || selectedFolders.length === 0)
                     return;
-                }
                 flowDir = selectedFolders[0].fsPath;
             }
         }
-        // Validate flow directory structure
-        const configPath = path.join(flowDir, 'flow_config.yaml');
-        if (!fs.existsSync(configPath)) {
-            vscode.window.showErrorMessage(`Flow directory must contain a flow_config.yaml file.\nSelected: ${flowDir}`, 'OK');
-            return;
-        }
-        // Check if it's a directory
-        if (!fs.statSync(flowDir).isDirectory()) {
-            vscode.window.showErrorMessage(`Selected path is not a directory: ${flowDir}`);
-            return;
-        }
-        // Get flow name from config for better title
-        let flowName = path.basename(flowDir);
-        try {
-            const configContent = fs.readFileSync(configPath, 'utf8');
-            const config = yaml.load(configContent);
-            if (config && config.name) {
-                flowName = config.name;
+        await openFlowViewer(flowDir, context);
+    });
+    const createFlowDisposable = vscode.commands.registerCommand('adk-extension.createFlow', async (uri) => {
+        const flowName = await vscode.window.showInputBox({
+            prompt: 'Enter a name for the new flow',
+            placeHolder: 'e.g. My Flow',
+            validateInput: (value) => {
+                const trimmed = value.trim();
+                if (!trimmed)
+                    return 'Name is required';
+                if (/[<>:"/\\|?*]/.test(trimmed))
+                    return 'Name cannot contain \\ / : * ? " < > |';
+                return undefined;
             }
-        }
-        catch (error) {
-            // Use directory name if config parsing fails
-        }
-        // Create and show webview
-        const panel = vscode.window.createWebviewPanel('flowViewer', `Flow Viewer: ${flowName}`, vscode.ViewColumn.One, {
-            enableScripts: true,
-            retainContextWhenHidden: true,
-            localResourceRoots: [
-                vscode.Uri.file(path.join(context.extensionPath, 'src'))
-            ],
-            enableCommandUris: true
         });
-        // Create message handler
-        const messageHandler = new webviewHandlers_1.WebviewMessageHandler(panel, flowDir);
-        // Set up message handler BEFORE setting HTML to avoid race condition
-        panel.webview.onDidReceiveMessage(async (message) => {
-            await messageHandler.handleMessage(message);
-        }, undefined, context.subscriptions);
-        // Get webview HTML content
-        panel.webview.html = (0, webviewContent_1.getWebviewContent)(panel.webview, context.extensionUri);
-        // Parse and load flow
+        if (!flowName || !flowName.trim())
+            return;
+        let parentDir;
+        if (uri && uri.fsPath) {
+            const stat = fs.statSync(uri.fsPath);
+            parentDir = stat.isDirectory() ? uri.fsPath : path.dirname(uri.fsPath);
+        }
+        else {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            const defaultUri = workspaceFolders && workspaceFolders.length > 0
+                ? workspaceFolders[0].uri
+                : undefined;
+            const selectedFolders = await vscode.window.showOpenDialog({
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+                openLabel: 'Select parent folder for the new flow',
+                defaultUri
+            });
+            if (!selectedFolders || selectedFolders.length === 0)
+                return;
+            parentDir = selectedFolders[0].fsPath;
+        }
+        const folderName = toSnakeCase(flowName.trim()) || 'new_flow';
+        const flowDir = path.join(parentDir, folderName);
+        if (fs.existsSync(flowDir)) {
+            vscode.window.showErrorMessage(`A folder "${folderName}" already exists at that location.`);
+            return;
+        }
         try {
-            const parser = new flowParser_1.FlowParser(flowDir);
-            const flowGraph = await parser.parseFlow();
-            messageHandler.setFlowGraphData(flowGraph);
-            // Log for debugging
-            console.log('Parsed flow graph:', {
-                nodeCount: flowGraph.nodes.length,
-                edgeCount: flowGraph.edges.length,
-                nodes: flowGraph.nodes.map(n => ({ id: n.id, label: n.label, type: n.type })),
-                edges: flowGraph.edges.map(e => ({ from: e.from, to: e.to, label: e.label }))
-            });
-            // Send flow data to webview immediately if it's already ready
-            panel.webview.postMessage({
-                command: 'loadFlow',
-                flowGraph: flowGraph
-            });
+            fs.mkdirSync(flowDir, { recursive: true });
+            const stepsDir = path.join(flowDir, 'steps');
+            fs.mkdirSync(stepsDir, { recursive: true });
+            const flowConfig = {
+                name: flowName.trim(),
+                description: 'New flow.',
+                start_step: 'greeting'
+            };
+            const flowConfigPath = path.join(flowDir, 'flow_config.yaml');
+            fs.writeFileSync(flowConfigPath, yaml.dump(flowConfig, { indent: 2, lineWidth: 100 }), 'utf8');
+            const greetingStep = `name: greeting
+step_type: default_step
+prompt: |
+  Enter your prompt here.
+extracted_entities: []
+conditions: []
+`;
+            fs.writeFileSync(path.join(stepsDir, 'greeting.yaml'), greetingStep, 'utf8');
+            vscode.window.showInformationMessage(`Flow "${flowName.trim()}" created. Opening flow viewer.`);
+            await openFlowViewer(flowDir, context);
+            const flowUri = vscode.Uri.file(flowDir);
+            await vscode.commands.executeCommand('revealInExplorer', flowUri);
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            vscode.window.showErrorMessage(`Error parsing flow: ${errorMessage}`, 'OK');
-            console.error('Flow parsing error:', error);
-            // Show error in webview
-            panel.webview.html = (0, webviewContent_1.getErrorWebviewContent)(errorMessage);
+            vscode.window.showErrorMessage(`Error creating flow: ${errorMessage}`);
+            console.error('Error creating flow:', error);
         }
     });
     // Toggle debug mode command
@@ -193,7 +254,7 @@ function activate(context) {
     const linter = new linter_1.AgentStudioLinter();
     linter.activate(context);
     (0, debug_1.debugLog)('Agent Studio Linter activated');
-    context.subscriptions.push(viewFlowDisposable, toggleDebugDisposable, pythonDefinitionProvider, pythonHoverProvider, pythonReferencesProvider);
+    context.subscriptions.push(viewFlowDisposable, createFlowDisposable, toggleDebugDisposable, pythonDefinitionProvider, pythonHoverProvider, pythonReferencesProvider);
 }
 // This method is called when your extension is deactivated
 function deactivate() { }
