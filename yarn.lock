@@ -142,6 +142,18 @@
   resolved "https://registry.yarnpkg.com/@colors/colors/-/colors-1.5.0.tgz#bb504579c1cae923e6576a4f5da43d25f97bdbd9"
   integrity sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ==
 
+"@dagrejs/dagre@~1.1.4":
+  version "1.1.8"
+  resolved "https://registry.yarnpkg.com/@dagrejs/dagre/-/dagre-1.1.8.tgz#fcbee59344c7b4f48b711ba30783543b70029310"
+  integrity sha512-5SEDlndt4W/LaVzPYJW+bSmSEZc9EzTf8rJ20WCKvjS5EAZAN0b+x0Yww7VMT4R3Wootkg+X9bUfUxazYw6Blw==
+  dependencies:
+    "@dagrejs/graphlib" "2.2.4"
+
+"@dagrejs/graphlib@2.2.4", "@dagrejs/graphlib@~2.2.4":
+  version "2.2.4"
+  resolved "https://registry.yarnpkg.com/@dagrejs/graphlib/-/graphlib-2.2.4.tgz#d77bfa9ff49e2307c0c6e6b8b26b5dd3c05816c4"
+  integrity sha512-mepCf/e9+SKYy1d02/UkvSy6+6MoyXhVxP8lLDfA7BPE1X1d4dR0sZznmbM8/XVJ1GPM+Svnx7Xj6ZweByWUkw==
+
 "@discoveryjs/json-ext@^0.6.1":
   version "0.6.3"
   resolved "https://registry.npmjs.org/@discoveryjs/json-ext/-/json-ext-0.6.3.tgz"
@@ -294,6 +306,28 @@
   resolved "https://registry.npmjs.org/@istanbuljs/schema/-/schema-0.1.3.tgz"
   integrity sha512-ZXRY4jNvVgSVQ8DL3LTcakaAtXwTVUxE81hslsyD2AtoXW/wVob10HkOJ1X/pAlcI7D+2YoZKg5do8G/w6RYgA==
 
+"@joint/core@^4.2.4", "@joint/core@~4.2.3":
+  version "4.2.4"
+  resolved "https://registry.yarnpkg.com/@joint/core/-/core-4.2.4.tgz#495d7974224fc3150539a648cbed7b14ae3235c6"
+  integrity sha512-GMXYz40VQ5AtDDp0/Z08pAN3w8H7DaUdKitVAqkDegXN29uzq5TvB/O7i0Mwc87WB3sc032Asj+hLKicCLjSxA==
+
+"@joint/layout-directed-graph@^4.2.3":
+  version "4.2.3"
+  resolved "https://registry.yarnpkg.com/@joint/layout-directed-graph/-/layout-directed-graph-4.2.3.tgz#0d2d8cfde0e55abe6c81f942bbe67a477e2b4586"
+  integrity sha512-LpwWzvGNH72ApISu8CWRP6aN1pu+n5gvgNUEs3/cV3tfwyyJAQ6Dfpi6pdAuZk0H7xZumyNn2S/FDdx+2pHxww==
+  dependencies:
+    "@dagrejs/dagre" "~1.1.4"
+    "@dagrejs/graphlib" "~2.2.4"
+    "@joint/core" "~4.2.3"
+
+"@joint/layout-msagl@^4.2.3":
+  version "4.2.3"
+  resolved "https://registry.yarnpkg.com/@joint/layout-msagl/-/layout-msagl-4.2.3.tgz#79446e18feab1a41ca5e54c609ae1d88e09b72ad"
+  integrity sha512-uS1TEnuHZnabBez4/JQT58Fcnpe3WyKcyG7XEawZGPr6EcEzuWoIVbtC02lG+8HZ1IuKjmi8CTNjOA6kWIXHIw==
+  dependencies:
+    "@joint/core" "~4.2.3"
+    "@msagl/core" "^1.1.23"
+
 "@jridgewell/gen-mapping@^0.3.5":
   version "0.3.13"
   resolved "https://registry.npmjs.org/@jridgewell/gen-mapping/-/gen-mapping-0.3.13.tgz"
@@ -327,6 +361,16 @@
   dependencies:
     "@jridgewell/resolve-uri" "^3.1.0"
     "@jridgewell/sourcemap-codec" "^1.4.14"
+
+"@msagl/core@^1.1.23":
+  version "1.1.23"
+  resolved "https://registry.yarnpkg.com/@msagl/core/-/core-1.1.23.tgz#aceae5baa846adb801324f4788f199f8e60da997"
+  integrity sha512-DWvrOW2ymdb+7x8bCjFtvvFP9d7mntjI5d8n30ymfoFTJRpGOsey5cF7RTPFPIrw7eHR/59hv0505CHEz0cl0g==
+  dependencies:
+    queue-typescript "^1.0.1"
+    reliable-random "^0.0.1"
+    stack-typescript "^1.0.4"
+    typescript-string-operations "^1.4.1"
 
 "@napi-rs/wasm-runtime@^0.2.5":
   version "0.2.12"
@@ -3982,6 +4026,11 @@ lines-and-columns@^1.1.6:
   resolved "https://registry.yarnpkg.com/lines-and-columns/-/lines-and-columns-1.2.4.tgz#eca284f75d2965079309dc0ad9255abb2ebc1632"
   integrity sha512-7ylylesZQ/PV29jhEDl3Ufjo6ZX7gCqJr5F7PKrqc93v7fzSymt1BpwEU8nAUXs8qzzvqhbjhK5QZg6Mt/HkBg==
 
+linked-list-typescript@^1.0.11:
+  version "1.0.15"
+  resolved "https://registry.yarnpkg.com/linked-list-typescript/-/linked-list-typescript-1.0.15.tgz#faeed93cf9203f102e2158c29edcddda320abe82"
+  integrity sha512-RIyUu9lnJIyIaMe63O7/aFv/T2v3KsMFuXMBbUQCHX+cgtGro86ETDj5ed0a8gQL2+DFjzYYsgVG4I36/cUwgw==
+
 linkify-it@^5.0.0:
   version "5.0.0"
   resolved "https://registry.yarnpkg.com/linkify-it/-/linkify-it-5.0.0.tgz#9ef238bfa6dc70bd8e7f9572b52d369af569b421"
@@ -5295,6 +5344,13 @@ queue-microtask@^1.2.2:
   resolved "https://registry.yarnpkg.com/queue-microtask/-/queue-microtask-1.2.3.tgz#4929228bbc724dfac43e0efb058caf7b6cfb6243"
   integrity sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A==
 
+queue-typescript@^1.0.1:
+  version "1.0.1"
+  resolved "https://registry.yarnpkg.com/queue-typescript/-/queue-typescript-1.0.1.tgz#2d7842fc3b3e0e3f33d077887a8f2a5bb0baf460"
+  integrity sha512-tkK08uPfmpPl0cX1WRSU3EoNb/T5zSoZPGkkpfGX4E8QayWvEmLS2cI3pFngNPkNTCU5pCDQ1IwlzN0L5gdFPg==
+  dependencies:
+    linked-list-typescript "^1.0.11"
+
 randombytes@^2.1.0:
   version "2.1.0"
   resolved "https://registry.npmjs.org/randombytes/-/randombytes-2.1.0.tgz"
@@ -5416,6 +5472,11 @@ registry-auth-token@^5.0.0:
   integrity sha512-P7B4+jq8DeD2nMsAcdfaqHbssgHtZ7Z5+++a5ask90fvmJ8p5je4mOa+wzu+DB4vQ5tdJV/xywY+UnVFeQLV5Q==
   dependencies:
     "@pnpm/npm-conf" "^3.0.2"
+
+reliable-random@^0.0.1:
+  version "0.0.1"
+  resolved "https://registry.yarnpkg.com/reliable-random/-/reliable-random-0.0.1.tgz#d74654d8281ca3d7fb3bad1a9f81b82c3e6798bb"
+  integrity sha512-xIGavEfnUNhy0PynyoqaWSkPBvDQf1NzVdXWXWYqeMH4Xx+887kuHSkoJm6uR/79XA0T5hkjv4H6GRTSNHih7A==
 
 require-directory@^2.1.1:
   version "2.1.1"
@@ -5833,6 +5894,13 @@ ssri@^12.0.0:
   integrity sha512-S7iGNosepx9RadX82oimUkvr0Ct7IjJbEbs4mJcTxst8um95J3sDYU1RBEOvdu6oL1Wek2ODI5i4MAw+dZ6cAQ==
   dependencies:
     minipass "^7.0.3"
+
+stack-typescript@^1.0.4:
+  version "1.0.4"
+  resolved "https://registry.yarnpkg.com/stack-typescript/-/stack-typescript-1.0.4.tgz#185c57ca2e5f40c15266794fbdf43e727e7c80f4"
+  integrity sha512-LAFycOVCWRYP6TDbwXR2XeXTmKjZT+wpdC4GEnBWWYfyTUK7NOassuqVTbUXsEA6CTCgk4FMOkUi+yFS33D1mw==
+  dependencies:
+    linked-list-typescript "^1.0.11"
 
 stdin-discarder@^0.2.2:
   version "0.2.2"
@@ -6279,6 +6347,11 @@ typescript-eslint@^8.48.1:
     "@typescript-eslint/parser" "8.52.0"
     "@typescript-eslint/typescript-estree" "8.52.0"
     "@typescript-eslint/utils" "8.52.0"
+
+typescript-string-operations@^1.4.1:
+  version "1.6.1"
+  resolved "https://registry.yarnpkg.com/typescript-string-operations/-/typescript-string-operations-1.6.1.tgz#6bcbf21e0e02978a28fda44aacd2fef41facb2ec"
+  integrity sha512-F6ScCJ15PcOniU2Rve/9ber5bDgFHlys74HbNXzpB3jP63gdM15Uow4DpT9sIwoyyiOW9HbIjSDVs/U0XtfjfQ==
 
 typescript@^5.9.3:
   version "5.9.3"

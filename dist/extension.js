@@ -53,10 +53,67 @@ const webviewContent_1 = __webpack_require__(30);
 const webviewHandlers_1 = __webpack_require__(31);
 const pythonLanguageFeatures_1 = __webpack_require__(33);
 const debug_1 = __webpack_require__(35);
-const jiraUtils_1 = __webpack_require__(36);
-const gitUtils_1 = __webpack_require__(38);
-const githubPrUtils_1 = __webpack_require__(41);
-const linter_1 = __webpack_require__(42);
+const linter_1 = __webpack_require__(36);
+function toSnakeCase(str) {
+    return str
+        .replace(/([a-z])([A-Z])/g, '$1_$2')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+        .replace(/[\s\-]+/g, '_')
+        .replace(/[^a-zA-Z0-9_]/g, '')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '')
+        .toLowerCase();
+}
+async function openFlowViewer(flowDir, context) {
+    const configPath = path.join(flowDir, 'flow_config.yaml');
+    if (!fs.existsSync(configPath)) {
+        vscode.window.showErrorMessage(`Flow directory must contain a flow_config.yaml file.\nSelected: ${flowDir}`, 'OK');
+        return;
+    }
+    if (!fs.statSync(flowDir).isDirectory()) {
+        vscode.window.showErrorMessage(`Selected path is not a directory: ${flowDir}`);
+        return;
+    }
+    let flowName = path.basename(flowDir);
+    try {
+        const configContent = fs.readFileSync(configPath, 'utf8');
+        const config = yaml.load(configContent);
+        if (config && config.name) {
+            flowName = config.name;
+        }
+    }
+    catch {
+        // Use directory name if config parsing fails
+    }
+    const panel = vscode.window.createWebviewPanel('flowViewer', `Flow Viewer: ${flowName}`, vscode.ViewColumn.One, {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [
+            vscode.Uri.file(path.join(context.extensionPath, 'src'))
+        ],
+        enableCommandUris: true
+    });
+    const messageHandler = new webviewHandlers_1.WebviewMessageHandler(panel, flowDir);
+    panel.webview.onDidReceiveMessage(async (message) => {
+        await messageHandler.handleMessage(message);
+    }, undefined, context.subscriptions);
+    panel.webview.html = (0, webviewContent_1.getWebviewContent)(panel.webview, context.extensionUri);
+    try {
+        const parser = new flowParser_1.FlowParser(flowDir);
+        const flowGraph = await parser.parseFlow();
+        messageHandler.setFlowGraphData(flowGraph);
+        panel.webview.postMessage({
+            command: 'loadFlow',
+            flowGraph: flowGraph
+        });
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Error parsing flow: ${errorMessage}`, 'OK');
+        console.error('Flow parsing error:', error);
+        panel.webview.html = (0, webviewContent_1.getErrorWebviewContent)(errorMessage);
+    }
+}
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 function activate(context) {
@@ -72,22 +129,18 @@ function activate(context) {
         let flowDir;
         if (uri && uri.fsPath) {
             flowDir = uri.fsPath;
-            // If a file was selected, get its directory
             if (!fs.statSync(flowDir).isDirectory()) {
                 flowDir = path.dirname(flowDir);
             }
         }
         else {
-            // If no URI provided, try to use the workspace folder
             const workspaceFolders = vscode.workspace.workspaceFolders;
             if (workspaceFolders && workspaceFolders.length > 0) {
-                // Check if workspace root has flow_config.yaml
                 const workspaceRoot = workspaceFolders[0].uri.fsPath;
                 if (fs.existsSync(path.join(workspaceRoot, 'flow_config.yaml'))) {
                     flowDir = workspaceRoot;
                 }
                 else {
-                    // Ask user to select a folder
                     const selectedFolders = await vscode.window.showOpenDialog({
                         canSelectFiles: false,
                         canSelectFolders: true,
@@ -95,102 +148,100 @@ function activate(context) {
                         openLabel: 'Select Flow Directory',
                         defaultUri: vscode.Uri.file(workspaceRoot)
                     });
-                    if (!selectedFolders || selectedFolders.length === 0) {
+                    if (!selectedFolders || selectedFolders.length === 0)
                         return;
-                    }
                     flowDir = selectedFolders[0].fsPath;
                 }
             }
             else {
-                // Ask user to select a folder
                 const selectedFolders = await vscode.window.showOpenDialog({
                     canSelectFiles: false,
                     canSelectFolders: true,
                     canSelectMany: false,
                     openLabel: 'Select Flow Directory'
                 });
-                if (!selectedFolders || selectedFolders.length === 0) {
+                if (!selectedFolders || selectedFolders.length === 0)
                     return;
-                }
                 flowDir = selectedFolders[0].fsPath;
             }
         }
-        // Validate flow directory structure
-        const configPath = path.join(flowDir, 'flow_config.yaml');
-        if (!fs.existsSync(configPath)) {
-            vscode.window.showErrorMessage(`Flow directory must contain a flow_config.yaml file.\nSelected: ${flowDir}`, 'OK');
-            return;
-        }
-        // Check if it's a directory
-        if (!fs.statSync(flowDir).isDirectory()) {
-            vscode.window.showErrorMessage(`Selected path is not a directory: ${flowDir}`);
-            return;
-        }
-        // Get flow name from config for better title
-        let flowName = path.basename(flowDir);
-        try {
-            const configContent = fs.readFileSync(configPath, 'utf8');
-            const config = yaml.load(configContent);
-            if (config && config.name) {
-                flowName = config.name;
+        await openFlowViewer(flowDir, context);
+    });
+    const createFlowDisposable = vscode.commands.registerCommand('adk-extension.createFlow', async (uri) => {
+        const flowName = await vscode.window.showInputBox({
+            prompt: 'Enter a name for the new flow',
+            placeHolder: 'e.g. My Flow',
+            validateInput: (value) => {
+                const trimmed = value.trim();
+                if (!trimmed)
+                    return 'Name is required';
+                if (/[<>:"/\\|?*]/.test(trimmed))
+                    return 'Name cannot contain \\ / : * ? " < > |';
+                return undefined;
             }
-        }
-        catch (error) {
-            // Use directory name if config parsing fails
-        }
-        // Create and show webview
-        const panel = vscode.window.createWebviewPanel('flowViewer', `Flow Viewer: ${flowName}`, vscode.ViewColumn.One, {
-            enableScripts: true,
-            retainContextWhenHidden: true,
-            localResourceRoots: [
-                vscode.Uri.file(path.join(context.extensionPath, 'src'))
-            ],
-            enableCommandUris: true
         });
-        // Create message handler
-        const messageHandler = new webviewHandlers_1.WebviewMessageHandler(panel, flowDir);
-        // Set up message handler BEFORE setting HTML to avoid race condition
-        panel.webview.onDidReceiveMessage(async (message) => {
-            await messageHandler.handleMessage(message);
-        }, undefined, context.subscriptions);
-        // Get webview HTML content
-        panel.webview.html = (0, webviewContent_1.getWebviewContent)(panel.webview, context.extensionUri);
-        // Parse and load flow
+        if (!flowName || !flowName.trim())
+            return;
+        let parentDir;
+        if (uri && uri.fsPath) {
+            const stat = fs.statSync(uri.fsPath);
+            parentDir = stat.isDirectory() ? uri.fsPath : path.dirname(uri.fsPath);
+        }
+        else {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            const defaultUri = workspaceFolders && workspaceFolders.length > 0
+                ? workspaceFolders[0].uri
+                : undefined;
+            const selectedFolders = await vscode.window.showOpenDialog({
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+                openLabel: 'Select parent folder for the new flow',
+                defaultUri
+            });
+            if (!selectedFolders || selectedFolders.length === 0)
+                return;
+            parentDir = selectedFolders[0].fsPath;
+        }
+        const folderName = toSnakeCase(flowName.trim()) || 'new_flow';
+        const flowDir = path.join(parentDir, folderName);
+        if (fs.existsSync(flowDir)) {
+            vscode.window.showErrorMessage(`A folder "${folderName}" already exists at that location.`);
+            return;
+        }
         try {
-            const parser = new flowParser_1.FlowParser(flowDir);
-            const flowGraph = await parser.parseFlow();
-            messageHandler.setFlowGraphData(flowGraph);
-            // Log for debugging
-            console.log('Parsed flow graph:', {
-                nodeCount: flowGraph.nodes.length,
-                edgeCount: flowGraph.edges.length,
-                nodes: flowGraph.nodes.map(n => ({ id: n.id, label: n.label, type: n.type })),
-                edges: flowGraph.edges.map(e => ({ from: e.from, to: e.to, label: e.label }))
-            });
-            // Send flow data to webview immediately if it's already ready
-            panel.webview.postMessage({
-                command: 'loadFlow',
-                flowGraph: flowGraph
-            });
+            fs.mkdirSync(flowDir, { recursive: true });
+            const stepsDir = path.join(flowDir, 'steps');
+            fs.mkdirSync(stepsDir, { recursive: true });
+            const flowConfig = {
+                name: flowName.trim(),
+                description: 'New flow.',
+                start_step: 'greeting'
+            };
+            const flowConfigPath = path.join(flowDir, 'flow_config.yaml');
+            fs.writeFileSync(flowConfigPath, yaml.dump(flowConfig, { indent: 2, lineWidth: 100 }), 'utf8');
+            const greetingStep = `name: greeting
+step_type: default_step
+prompt: |
+  Enter your prompt here.
+extracted_entities: []
+conditions: []
+`;
+            fs.writeFileSync(path.join(stepsDir, 'greeting.yaml'), greetingStep, 'utf8');
+            vscode.window.showInformationMessage(`Flow "${flowName.trim()}" created. Opening flow viewer.`);
+            await openFlowViewer(flowDir, context);
+            const flowUri = vscode.Uri.file(flowDir);
+            await vscode.commands.executeCommand('revealInExplorer', flowUri);
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            vscode.window.showErrorMessage(`Error parsing flow: ${errorMessage}`, 'OK');
-            console.error('Flow parsing error:', error);
-            // Show error in webview
-            panel.webview.html = (0, webviewContent_1.getErrorWebviewContent)(errorMessage);
+            vscode.window.showErrorMessage(`Error creating flow: ${errorMessage}`);
+            console.error('Error creating flow:', error);
         }
     });
     // Toggle debug mode command
     const toggleDebugDisposable = vscode.commands.registerCommand('adk-extension.toggleDebugMode', async () => {
         await (0, debug_1.toggleDebugMode)();
-    });
-    // Create JIRA ticket from branch commands
-    const createJiraTicketDisposable = vscode.commands.registerCommand('adk-extension.createJiraTicket', async () => {
-        await createJiraTicketFromBranch(context);
-    });
-    const clearJiraMappingsDisposable = vscode.commands.registerCommand('adk-extension.clearJiraMappings', async () => {
-        await clearJiraMappings(context);
     });
     // Register Python language features for function resolution
     (0, debug_1.debugLog)('Registering Python language features...');
@@ -203,337 +254,7 @@ function activate(context) {
     const linter = new linter_1.AgentStudioLinter();
     linter.activate(context);
     (0, debug_1.debugLog)('Agent Studio Linter activated');
-    context.subscriptions.push(viewFlowDisposable, toggleDebugDisposable, createJiraTicketDisposable, clearJiraMappingsDisposable, pythonDefinitionProvider, pythonHoverProvider, pythonReferencesProvider);
-}
-/**
- * Gets the stored project/component mapping for a project directory
- */
-function getProjectComponentMapping(context, projectDir) {
-    const mappings = context.workspaceState.get('jiraProjectMappings', {});
-    return mappings[projectDir] || null;
-}
-/**
- * Stores the project/component mapping for a project directory
- */
-async function setProjectComponentMapping(context, projectDir, project, component) {
-    const mappings = context.workspaceState.get('jiraProjectMappings', {});
-    mappings[projectDir] = { project, component };
-    await context.workspaceState.update('jiraProjectMappings', mappings);
-}
-/**
- * Clears all stored JIRA project/component mappings for this workspace
- */
-async function clearJiraMappings(context) {
-    await context.workspaceState.update('jiraProjectMappings', {});
-    vscode.window.showInformationMessage('JIRA project mappings cleared. You will be prompted to select project/component on the next ticket creation.');
-}
-/**
- * Creates a JIRA ticket from the current branch changes
- */
-async function createJiraTicketFromBranch(context) {
-    try {
-        // Get workspace root
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders || workspaceFolders.length === 0) {
-            vscode.window.showErrorMessage('No workspace folder found');
-            return;
-        }
-        const workspaceRoot = workspaceFolders[0].uri.fsPath;
-        // Show progress
-        await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: 'Creating JIRA Ticket',
-            cancellable: false
-        }, async (progress) => {
-            progress.report({ increment: 0, message: 'Getting branch information...' });
-            // Get current branch
-            const branch = await (0, gitUtils_1.getCurrentBranch)(workspaceRoot);
-            (0, debug_1.debugLog)(`Current branch: ${branch}`);
-            progress.report({ increment: 20, message: 'Getting changed files...' });
-            // Get changed files
-            const changedFiles = await (0, gitUtils_1.getChangedFiles)(workspaceRoot, branch);
-            (0, debug_1.debugLog)(`Changed files: ${changedFiles.length}`);
-            if (changedFiles.length === 0) {
-                vscode.window.showWarningMessage('No changes found in current branch');
-                return;
-            }
-            // Determine project directory
-            const dirInfo = (0, gitUtils_1.getProjectDirectory)(changedFiles, workspaceRoot);
-            // Use project directory for caching (more specific), fallback to account directory
-            const projectDir = dirInfo.projectDir || dirInfo.accountDir;
-            (0, debug_1.debugLog)(`Account directory: ${dirInfo.accountDir || 'none'}, Project directory: ${dirInfo.projectDir || 'none'}`);
-            progress.report({ increment: 30, message: 'Getting branch diff...' });
-            // Get diff
-            const diff = await (0, gitUtils_1.getBranchDiff)(workspaceRoot, branch);
-            (0, debug_1.debugLog)(`Diff length: ${diff.length}`);
-            // Get or prompt for project and component
-            let project;
-            let component;
-            if (projectDir) {
-                // Check if we have a cached mapping
-                const mapping = getProjectComponentMapping(context, projectDir);
-                if (mapping) {
-                    project = mapping.project;
-                    component = mapping.component;
-                    (0, debug_1.debugLog)(`Using cached mapping for ${projectDir}: project=${project}, component=${component}`);
-                }
-                else {
-                    // Build a descriptive prompt showing account/project info with project name
-                    let placeHolderText = '';
-                    if (dirInfo.projectDir) {
-                        const [accountDir, projDir] = dirInfo.projectDir.split('/');
-                        // Try to get project name from project.yaml
-                        const projectName = (0, gitUtils_1.getProjectName)(workspaceRoot, accountDir, projDir);
-                        if (projectName) {
-                            placeHolderText = `Select project for "${projectName}" (${accountDir}/${projDir})`;
-                        }
-                        else {
-                            placeHolderText = `Select project for "${accountDir}/${projDir}"`;
-                        }
-                    }
-                    else if (dirInfo.accountDir) {
-                        placeHolderText = `Select project for "${dirInfo.accountDir}"`;
-                    }
-                    else {
-                        placeHolderText = 'Select JIRA project';
-                    }
-                    progress.report({ increment: 40, message: 'Fetching JIRA projects...' });
-                    // Fetch projects from JIRA
-                    let projects;
-                    try {
-                        projects = await (0, jiraUtils_1.getJiraProjects)();
-                    }
-                    catch (error) {
-                        (0, debug_1.debugLog)(`Failed to fetch JIRA projects: ${error}`);
-                        // Fallback to input box if API call fails
-                        project = await vscode.window.showInputBox({
-                            prompt: 'Enter JIRA project key',
-                            placeHolder: 'e.g., PROJ',
-                            validateInput: (value) => {
-                                if (!value || value.trim().length === 0) {
-                                    return 'Project key is required';
-                                }
-                                return null;
-                            }
-                        }) || '';
-                        if (!project) {
-                            return; // User cancelled
-                        }
-                        // Set component to undefined if we used fallback
-                        component = undefined;
-                    }
-                    if (projects && projects.length > 0) {
-                        // Show dropdown for project selection
-                        const projectItems = projects.map(p => ({
-                            label: p.key,
-                            description: p.name,
-                            detail: `Project: ${p.name}`,
-                            value: p.key
-                        }));
-                        const selectedProject = await vscode.window.showQuickPick(projectItems, {
-                            placeHolder: placeHolderText,
-                            canPickMany: false
-                        });
-                        if (!selectedProject) {
-                            return; // User cancelled
-                        }
-                        project = selectedProject.value;
-                        // Fetch components for the selected project
-                        progress.report({ increment: 45, message: 'Fetching components...' });
-                        let components = [];
-                        try {
-                            components = await (0, jiraUtils_1.getJiraComponents)(project);
-                        }
-                        catch (error) {
-                            (0, debug_1.debugLog)(`Failed to fetch JIRA components: ${error}`);
-                        }
-                        if (components && components.length > 0) {
-                            // Show dropdown for component selection
-                            const componentItems = [
-                                { label: 'None', description: 'No component', value: undefined },
-                                ...components.map(c => ({
-                                    label: c.name,
-                                    description: `Component: ${c.name}`,
-                                    value: c.name
-                                }))
-                            ];
-                            const selectedComponent = await vscode.window.showQuickPick(componentItems, {
-                                placeHolder: 'Select component (optional)',
-                                canPickMany: false
-                            });
-                            if (selectedComponent) {
-                                component = selectedComponent.value;
-                            }
-                        }
-                        else {
-                            // No components available, skip component selection
-                            component = undefined;
-                        }
-                        // Store the mapping for future use (using projectDir which is more specific)
-                        if (project) {
-                            await setProjectComponentMapping(context, projectDir, project, component);
-                        }
-                    }
-                    else if (!project) {
-                        // No projects found and no fallback was used
-                        vscode.window.showErrorMessage('No JIRA projects found and unable to enter project key manually');
-                        return;
-                    }
-                }
-            }
-            else {
-                // No specific project directory, ask user
-                progress.report({ increment: 40, message: 'Fetching JIRA projects...' });
-                // Fetch projects from JIRA
-                let projects;
-                try {
-                    projects = await (0, jiraUtils_1.getJiraProjects)();
-                }
-                catch (error) {
-                    (0, debug_1.debugLog)(`Failed to fetch JIRA projects: ${error}`);
-                    // Fallback to input box if API call fails
-                    project = await vscode.window.showInputBox({
-                        prompt: 'Enter JIRA project key',
-                        placeHolder: 'e.g., PROJ',
-                        validateInput: (value) => {
-                            if (!value || value.trim().length === 0) {
-                                return 'Project key is required';
-                            }
-                            return null;
-                        }
-                    }) || '';
-                    if (!project) {
-                        return; // User cancelled
-                    }
-                    // Set component to undefined if we used fallback
-                    component = undefined;
-                }
-                if (projects && projects.length > 0) {
-                    // Show dropdown for project selection
-                    const projectItems = projects.map(p => ({
-                        label: p.key,
-                        description: p.name,
-                        detail: `Project: ${p.name}`,
-                        value: p.key
-                    }));
-                    const selectedProject = await vscode.window.showQuickPick(projectItems, {
-                        placeHolder: 'Select JIRA project',
-                        canPickMany: false
-                    });
-                    if (!selectedProject) {
-                        return; // User cancelled
-                    }
-                    project = selectedProject.value;
-                    // Fetch components for the selected project
-                    progress.report({ increment: 45, message: 'Fetching components...' });
-                    let components = [];
-                    try {
-                        components = await (0, jiraUtils_1.getJiraComponents)(project);
-                    }
-                    catch (error) {
-                        (0, debug_1.debugLog)(`Failed to fetch JIRA components: ${error}`);
-                    }
-                    if (components && components.length > 0) {
-                        // Show dropdown for component selection
-                        const componentItems = [
-                            { label: 'None', description: 'No component', value: undefined },
-                            ...components.map(c => ({
-                                label: c.name,
-                                description: `Component: ${c.name}`,
-                                value: c.name
-                            }))
-                        ];
-                        const selectedComponent = await vscode.window.showQuickPick(componentItems, {
-                            placeHolder: 'Select component (optional)',
-                            canPickMany: false
-                        });
-                        if (selectedComponent) {
-                            component = selectedComponent.value;
-                        }
-                    }
-                    else {
-                        // No components available, skip component selection
-                        component = undefined;
-                    }
-                }
-                else if (!project) {
-                    // No projects found and no fallback was used
-                    vscode.window.showErrorMessage('No JIRA projects found and unable to enter project key manually');
-                    return;
-                }
-            }
-            // Ensure project is set before creating ticket
-            if (!project) {
-                vscode.window.showErrorMessage('Project key is required');
-                return;
-            }
-            progress.report({ increment: 50, message: 'Creating JIRA ticket...' });
-            // Create summary and description
-            const summary = (0, gitUtils_1.createSummaryFromBranch)(branch, changedFiles);
-            // Keep description concise - only show changed files, no diff
-            const maxFilesToShow = 50;
-            const filesList = changedFiles.slice(0, maxFilesToShow).map(f => `- ${f}`).join('\n');
-            const filesSummary = changedFiles.length > maxFilesToShow
-                ? `${filesList}\n... and ${changedFiles.length - maxFilesToShow} more files (${changedFiles.length} total)`
-                : filesList;
-            const description = `Branch: ${branch}\n\nChanged files (${changedFiles.length}):\n${filesSummary}`;
-            // Create JIRA ticket
-            const ticket = await (0, jiraUtils_1.createJiraTicket)(summary, description, project, component);
-            const ticketUrl = (0, jiraUtils_1.getJiraTicketUrl)(ticket.key);
-            (0, debug_1.debugLog)(`Created JIRA ticket: ${ticket.key}`);
-            progress.report({ increment: 80, message: 'Updating PR description...' });
-            // Try to find and update PR
-            try {
-                const repoInfo = await (0, githubPrUtils_1.getGitHubRepo)(workspaceRoot);
-                if (repoInfo) {
-                    const pr = await (0, githubPrUtils_1.findPRForBranch)(repoInfo.owner, repoInfo.repo, branch);
-                    if (pr) {
-                        await (0, githubPrUtils_1.updatePRDescription)(repoInfo.owner, repoInfo.repo, pr.number, ticketUrl, ticket.key);
-                        (0, debug_1.debugLog)(`Updated PR #${pr.number} with JIRA ticket`);
-                        vscode.window.showInformationMessage(`JIRA ticket ${ticket.key} created and added to PR #${pr.number}`, 'Open Ticket', 'Open PR').then(action => {
-                            if (action === 'Open Ticket') {
-                                vscode.env.openExternal(vscode.Uri.parse(ticketUrl));
-                            }
-                            else if (action === 'Open PR') {
-                                vscode.env.openExternal(vscode.Uri.parse(pr.html_url));
-                            }
-                        });
-                    }
-                    else {
-                        // No PR found
-                        vscode.window.showInformationMessage(`JIRA ticket ${ticket.key} created (no PR found for this branch)`, 'Open Ticket').then(action => {
-                            if (action === 'Open Ticket') {
-                                vscode.env.openExternal(vscode.Uri.parse(ticketUrl));
-                            }
-                        });
-                    }
-                }
-                else {
-                    // Could not determine GitHub repo
-                    vscode.window.showInformationMessage(`JIRA ticket ${ticket.key} created`, 'Open Ticket').then(action => {
-                        if (action === 'Open Ticket') {
-                            vscode.env.openExternal(vscode.Uri.parse(ticketUrl));
-                        }
-                    });
-                }
-            }
-            catch (error) {
-                // PR update failed, but ticket was created
-                (0, debug_1.debugLog)(`Failed to update PR: ${error}`);
-                vscode.window.showInformationMessage(`JIRA ticket ${ticket.key} created (failed to update PR)`, 'Open Ticket').then(action => {
-                    if (action === 'Open Ticket') {
-                        vscode.env.openExternal(vscode.Uri.parse(ticketUrl));
-                    }
-                });
-            }
-            progress.report({ increment: 100, message: 'Complete!' });
-        });
-    }
-    catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        vscode.window.showErrorMessage(`Failed to create JIRA ticket: ${errorMessage}`);
-        (0, debug_1.debugLog)(`Error creating JIRA ticket: ${error}`);
-    }
+    context.subscriptions.push(viewFlowDisposable, createFlowDisposable, toggleDebugDisposable, pythonDefinitionProvider, pythonHoverProvider, pythonReferencesProvider);
 }
 // This method is called when your extension is deactivated
 function deactivate() { }
@@ -4677,24 +4398,22 @@ class FlowParser {
         const flowFunctions = await this.parseFlowFunctions();
         const globalFunctions = await this.parseGlobalFunctions();
         const entities = await this.parseEntities();
+        const variantAttributeDefinitions = await this.parseVariantAttributeDefinitions();
+        const variantAttributes = variantAttributeDefinitions.map((a) => a.name);
+        const variables = await this.discoverVariables();
         console.log(`Parsing flow: ${config.name}`);
         console.log(`Found ${steps.size} steps:`, Array.from(steps.keys()));
         console.log(`Found ${functionSteps.size} function steps:`, Array.from(functionSteps.keys()));
         console.log(`Found ${flowFunctions.size} flow functions:`, Array.from(flowFunctions.keys()));
         console.log(`Found ${globalFunctions.size} global functions:`, Array.from(globalFunctions.keys()));
         console.log(`Found ${entities.length} entities:`, entities.map(e => e.name));
+        console.log(`Found ${variantAttributes.length} variant attributes:`, variantAttributes);
+        console.log(`Variant attribute definitions:`, variantAttributeDefinitions.length);
+        console.log(`Found ${variables.length} variables:`, variables);
         const nodes = [];
         const edges = [];
         const nodeMap = new Map();
-        // Add start node
-        const startNode = {
-            id: 'start',
-            label: 'Start',
-            type: 'end',
-            details: `Flow: ${config.name}\n${config.description || ''}\n\nStart Step: ${config.start_step || 'N/A'}`
-        };
-        nodes.push(startNode);
-        nodeMap.set('start', startNode);
+        // No separate start node; start step is indicated by config.start_step (green circle in viewer)
         // Add exit node (steps that call conv.exit_flow() transition here)
         const exitNode = {
             id: 'exit',
@@ -4737,14 +4456,6 @@ class FlowParser {
         }
         // Don't create function nodes - functions will be shown as clickable links in step details
         // Store function info for step details and transitions
-        // Add edge from start to first step
-        if (config.start_step && nodeMap.has(config.start_step)) {
-            edges.push({
-                from: 'start',
-                to: config.start_step,
-                label: 'start'
-            });
-        }
         // Parse transitions from step prompts
         // Functions are not shown as nodes, but we create edges directly to target steps if functions have goto_step
         for (const [stepName, stepData] of steps.entries()) {
@@ -4866,9 +4577,20 @@ class FlowParser {
                 }
             }
         }
+        // Deduplicate edges: same from+to+label should only appear once
+        const edgeKey = (e) => `${e.from}|${e.to}|${e.label}`;
+        const seen = new Set();
+        const uniqueEdges = [];
+        for (const edge of edges) {
+            const key = edgeKey(edge);
+            if (!seen.has(key)) {
+                seen.add(key);
+                uniqueEdges.push(edge);
+            }
+        }
         return {
             nodes,
-            edges,
+            edges: uniqueEdges,
             config,
             flowFunctions: Array.from(flowFunctions.entries()).map(([name, info]) => ({
                 name,
@@ -4884,8 +4606,98 @@ class FlowParser {
                 type: 'global-function',
                 filePath: this.getGlobalFunctionPath(name)
             })),
-            entities
+            entities,
+            variantAttributes,
+            variantAttributeDefinitions,
+            variables
         };
+    }
+    /** Get project root (directory containing config/). */
+    getProjectRoot() {
+        let currentDir = this.flowDir;
+        while (currentDir !== path.dirname(currentDir)) {
+            const parentDir = path.dirname(currentDir);
+            const dirName = path.basename(currentDir);
+            if (dirName === 'flows' || path.basename(parentDir) === 'flows') {
+                currentDir = parentDir;
+                continue;
+            }
+            const configDir = path.join(currentDir, 'config');
+            if (fs.existsSync(configDir)) {
+                return currentDir;
+            }
+            currentDir = parentDir;
+        }
+        return null;
+    }
+    /**
+     * Parse config/variant_attributes.yaml and return full definitions for the attributes panel.
+     * Format: attributes: [ { name: attribute_name, values: { variant_name: value, ... } }, ... ]
+     */
+    async parseVariantAttributeDefinitions() {
+        const projectRoot = this.getProjectRoot();
+        if (!projectRoot)
+            return [];
+        const attrPath = path.join(projectRoot, 'config', 'variant_attributes.yaml');
+        if (!fs.existsSync(attrPath)) {
+            console.warn('variant_attributes.yaml not found at', attrPath);
+            return [];
+        }
+        try {
+            const content = fs.readFileSync(attrPath, 'utf8');
+            const parsed = yaml.load(content);
+            if (!parsed || typeof parsed !== 'object')
+                return [];
+            const attrs = parsed.attributes;
+            if (attrs === undefined || attrs === null || !Array.isArray(attrs))
+                return [];
+            return attrs
+                .filter((v) => v && typeof v === 'object' && typeof v.name === 'string')
+                .map((v) => ({
+                name: String(v.name).trim(),
+                values: v.values && typeof v.values === 'object' ? { ...v.values } : {}
+            }))
+                .filter((a) => a.name.length > 0);
+        }
+        catch (error) {
+            console.error('Error parsing variant_attributes.yaml:', error);
+        }
+        return [];
+    }
+    /** Search codebase for conv.state.<variable_name> and return unique variable names for {{vrbl:name}}. */
+    async discoverVariables() {
+        const projectRoot = this.getProjectRoot();
+        if (!projectRoot)
+            return [];
+        const convStateRe = /conv\.state\.([a-zA-Z_][a-zA-Z0-9_]*)/g;
+        const seen = new Set();
+        const searchDir = (dir) => {
+            if (!fs.existsSync(dir))
+                return;
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const e of entries) {
+                const full = path.join(dir, e.name);
+                if (e.isDirectory()) {
+                    if (e.name !== 'node_modules' && e.name !== '.git' && e.name !== '__pycache__') {
+                        searchDir(full);
+                    }
+                }
+                else if (e.isFile() && (e.name.endsWith('.py') || e.name.endsWith('.yaml') || e.name.endsWith('.yml'))) {
+                    try {
+                        const content = fs.readFileSync(full, 'utf8');
+                        let m;
+                        while ((m = convStateRe.exec(content)) !== null) {
+                            seen.add(m[1]);
+                        }
+                    }
+                    catch {
+                        // ignore read errors
+                    }
+                }
+            }
+        };
+        searchDir(projectRoot);
+        return Array.from(seen).sort();
     }
     async parseConfig() {
         const configPath = path.join(this.flowDir, 'flow_config.yaml');
@@ -4991,33 +4803,11 @@ class FlowParser {
         return functions;
     }
     async parseEntities() {
-        // Find project root to locate config/entities.yaml
-        // Project root is the parent of the 'flows' directory
-        let currentDir = this.flowDir;
-        let projectRoot = null;
-        // Go up the directory tree to find the project root (parent of flows directory)
-        while (currentDir !== path.dirname(currentDir)) {
-            const parentDir = path.dirname(currentDir);
-            const dirName = path.basename(currentDir);
-            // If we're in a flow directory inside 'flows', the project root is the parent of 'flows'
-            if (dirName === 'flows' || path.basename(parentDir) === 'flows') {
-                // Keep going up to find project root
-                currentDir = parentDir;
-                continue;
-            }
-            // Check if this directory has a config folder
-            const configDir = path.join(currentDir, 'config');
-            if (fs.existsSync(configDir)) {
-                projectRoot = currentDir;
-                break;
-            }
-            currentDir = parentDir;
-        }
+        const projectRoot = this.getProjectRoot();
         if (!projectRoot) {
             console.warn('Could not find project root with config directory');
             return [];
         }
-        console.log('Found project root:', projectRoot);
         const entitiesPath = path.join(projectRoot, 'config', 'entities.yaml');
         if (!fs.existsSync(entitiesPath)) {
             console.warn('entities.yaml not found at', entitiesPath);
@@ -5158,21 +4948,30 @@ class FlowParser {
     parseTransitions(prompt) {
         const transitions = [];
         // Match {{fn:function_name}} or {{fn:function_name}}('param') - global functions
+        const seenTargets = new Set();
         const fnRegex = /\{\{fn:(\w+)\}\}(?:\([^)]*\))?/g;
         let match;
         while ((match = fnRegex.exec(prompt)) !== null) {
-            transitions.push({
-                type: 'function',
-                target: match[1]
-            });
+            const key = `function:${match[1]}`;
+            if (!seenTargets.has(key)) {
+                seenTargets.add(key);
+                transitions.push({
+                    type: 'function',
+                    target: match[1]
+                });
+            }
         }
         // Match {{ft:function_name}} - flow functions
         const ftRegex = /\{\{ft:(\w+)\}\}/g;
         while ((match = ftRegex.exec(prompt)) !== null) {
-            transitions.push({
-                type: 'flow-function',
-                target: match[1]
-            });
+            const key = `flow-function:${match[1]}`;
+            if (!seenTargets.has(key)) {
+                seenTargets.add(key);
+                transitions.push({
+                    type: 'flow-function',
+                    target: match[1]
+                });
+            }
         }
         // Try to extract conditions from markdown bold text before transitions
         const lines = prompt.split('\n');
@@ -5300,6 +5099,7 @@ exports.getWebviewContent = getWebviewContent;
 exports.getErrorWebviewContent = getErrorWebviewContent;
 const path = __importStar(__webpack_require__(2));
 const fs = __importStar(__webpack_require__(3));
+const vscode = __importStar(__webpack_require__(1));
 /**
  * Generates the webview HTML content with proper CSP
  */
@@ -5307,11 +5107,18 @@ function getWebviewContent(webview, extensionUri) {
     // Load HTML content from the extension directory
     const htmlPath = path.join(extensionUri.fsPath, 'src', 'flowViewer.html');
     let htmlContent = fs.readFileSync(htmlPath, 'utf8');
+    // Replace CDN script URLs with local webview URIs for offline support
+    const jointUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'joint.min.js')));
+    const graphlibUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'graphlib.min.js')));
+    const dagreUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'dagre.min.js')));
+    const directedGraphUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'DirectedGraph.min.js')));
+    htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@joint/core/dist/joint.min.js', jointUri.toString());
+    htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@dagrejs/graphlib/dist/graphlib.min.js', graphlibUri.toString());
+    htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@dagrejs/dagre/dist/dagre.min.js', dagreUri.toString());
+    htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@joint/layout-directed-graph/dist/DirectedGraph.min.js', directedGraphUri.toString());
     // Add CSP meta tag if not present
     const cspSource = webview.cspSource;
-    // Note: VS Code adds its own CSP, so we need to ensure our CSP allows what we need
-    // The CSP needs to allow: scripts from unpkg, inline scripts, and connections to unpkg
-    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${cspSource} https://*.vscode-cdn.net https://unpkg.com 'unsafe-inline' 'unsafe-eval'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource} https: data:; connect-src ${cspSource} https://*.vscode-cdn.net https://unpkg.com; font-src ${cspSource} https: data:;">`;
+    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${cspSource} 'unsafe-inline' 'unsafe-eval'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource} https: data:; font-src ${cspSource} https: data:;">`;
     // Replace existing CSP or insert new one
     if (htmlContent.includes('Content-Security-Policy')) {
         // Replace existing CSP
@@ -5471,6 +5278,15 @@ class WebviewMessageHandler {
         return null;
     }
     /**
+     * Gets the path to the variant_attributes.yaml file (same config dir as entities).
+     */
+    getVariantAttributesFilePath() {
+        const entitiesPath = this.getEntitiesFilePath();
+        if (!entitiesPath)
+            return null;
+        return path.join(path.dirname(entitiesPath), 'variant_attributes.yaml');
+    }
+    /**
      * Sets the current flow graph data
      */
     setFlowGraphData(data) {
@@ -5499,11 +5315,17 @@ class WebviewMessageHandler {
             case 'saveEntities':
                 await this.handleSaveEntities(message.entities);
                 break;
+            case 'saveVariantAttributes':
+                await this.handleSaveVariantAttributes(message.attributes);
+                break;
             case 'createStep':
                 await this.handleCreateStep(message.stepName, message.stepType, message.forCondition);
                 break;
             case 'deleteStep':
                 await this.handleDeleteStep(message.nodeId, message.filePath);
+                break;
+            case 'setStartStep':
+                await this.handleSetStartStep(message.nodeId);
                 break;
             case 'showError':
                 vscode.window.showErrorMessage(message.message);
@@ -5649,7 +5471,7 @@ class WebviewMessageHandler {
             });
             fs.writeFileSync(entitiesFilePath, yamlContent, 'utf8');
             // Show success message
-            vscode.window.showInformationMessage(`Entities saved successfully (${entities.length} entities)`);
+            vscode.window.showInformationMessage('Entity saved');
             // Reload the flow to update entities in the graph
             const parser = new flowParser_1.FlowParser(this.flowDir);
             const updatedFlowGraph = await parser.parseFlow();
@@ -5675,6 +5497,73 @@ class WebviewMessageHandler {
                 success: false,
                 error: errorMessage
             });
+        }
+    }
+    async handleSaveVariantAttributes(attributes) {
+        try {
+            const filePath = this.getVariantAttributesFilePath();
+            if (!filePath) {
+                vscode.window.showErrorMessage('Could not find variant_attributes.yaml file location');
+                return;
+            }
+            const configDir = path.dirname(filePath);
+            if (!fs.existsSync(configDir)) {
+                fs.mkdirSync(configDir, { recursive: true });
+            }
+            const data = { attributes };
+            const yamlContent = yaml.dump(data, {
+                indent: 2,
+                lineWidth: 100,
+                noRefs: true,
+                quotingType: '"',
+                forceQuotes: false
+            });
+            fs.writeFileSync(filePath, yamlContent, 'utf8');
+            vscode.window.showInformationMessage('Variant attribute saved');
+            const parser = new flowParser_1.FlowParser(this.flowDir);
+            const updatedFlowGraph = await parser.parseFlow();
+            this.flowGraphData = updatedFlowGraph;
+            this.panel.webview.postMessage({ command: 'loadFlow', flowGraph: updatedFlowGraph });
+            this.panel.webview.postMessage({ command: 'variantAttributesSaved', success: true });
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`Error saving variant attributes: ${errorMessage}`);
+            console.error('Error saving variant attributes:', error);
+            this.panel.webview.postMessage({ command: 'variantAttributesSaved', success: false, error: errorMessage });
+        }
+    }
+    async handleSetStartStep(nodeId) {
+        try {
+            const configPath = path.join(this.flowDir, 'flow_config.yaml');
+            if (!fs.existsSync(configPath)) {
+                vscode.window.showErrorMessage('flow_config.yaml not found');
+                return;
+            }
+            const content = fs.readFileSync(configPath, 'utf8');
+            const config = yaml.load(content);
+            if (!config || typeof config !== 'object') {
+                vscode.window.showErrorMessage('Invalid flow_config.yaml');
+                return;
+            }
+            config.start_step = nodeId;
+            const yamlContent = yaml.dump(config, {
+                indent: 2,
+                lineWidth: 100,
+                noRefs: true,
+                quotingType: '"',
+                forceQuotes: false
+            });
+            fs.writeFileSync(configPath, yamlContent, 'utf8');
+            vscode.window.showInformationMessage('Start step updated');
+            const parser = new flowParser_1.FlowParser(this.flowDir);
+            const updatedFlowGraph = await parser.parseFlow();
+            this.flowGraphData = updatedFlowGraph;
+            this.panel.webview.postMessage({ command: 'loadFlow', flowGraph: updatedFlowGraph });
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`Error updating start step: ${errorMessage}`);
         }
     }
     async handleCreateStep(stepName, stepType, forCondition) {
@@ -6603,988 +6492,15 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.createJiraTicket = createJiraTicket;
-exports.getJiraProjects = getJiraProjects;
-exports.getJiraComponents = getJiraComponents;
-exports.getJiraTicketUrl = getJiraTicketUrl;
-const https = __importStar(__webpack_require__(37));
-/**
- * Gets the current user's account ID from JIRA
- */
-async function getCurrentUserAccountId(jiraUrl, jiraEmail, jiraApiToken) {
-    return new Promise((resolve, reject) => {
-        let hostname;
-        let basePath = '';
-        try {
-            const url = new URL(jiraUrl);
-            hostname = url.hostname;
-            basePath = url.pathname.replace(/\/$/, '');
-        }
-        catch (error) {
-            reject(new Error(`Invalid JIRA_URL: ${jiraUrl}`));
-            return;
-        }
-        const apiPath = `${basePath}/rest/api/3/myself`;
-        const auth = Buffer.from(`${jiraEmail}:${jiraApiToken}`).toString('base64');
-        const options = {
-            hostname,
-            path: apiPath,
-            method: 'GET',
-            headers: {
-                'Authorization': `Basic ${auth}`,
-                'Accept': 'application/json'
-            }
-        };
-        const req = https.request(options, (res) => {
-            let data = '';
-            res.on('data', (chunk) => {
-                data += chunk;
-            });
-            res.on('end', () => {
-                if (res.statusCode === 200) {
-                    try {
-                        const user = JSON.parse(data);
-                        // JIRA API v3 returns accountId
-                        resolve(user.accountId || null);
-                    }
-                    catch (error) {
-                        reject(new Error('Failed to parse JIRA API response'));
-                    }
-                }
-                else {
-                    // If we can't get the user info, return null (assignment will be skipped)
-                    resolve(null);
-                }
-            });
-        });
-        req.on('error', (error) => {
-            // On error, return null instead of rejecting (assignment will be skipped)
-            resolve(null);
-        });
-        req.setTimeout(10000, () => {
-            req.destroy();
-            resolve(null);
-        });
-        req.end();
-    });
-}
-/**
- * Creates a JIRA ticket with the given details
- */
-async function createJiraTicket(summary, description, project, component) {
-    return new Promise(async (resolve, reject) => {
-        const jiraUrl = process.env.JIRA_URL || 'https://poly-ai.atlassian.net';
-        const jiraEmail = process.env.JIRA_USER;
-        const jiraApiToken = process.env.JIRA_API_TOKEN;
-        if (!jiraEmail || !jiraApiToken) {
-            reject(new Error('JIRA_USER and JIRA_API_TOKEN environment variables are required'));
-            return;
-        }
-        // Parse JIRA URL to get hostname and path
-        let hostname;
-        let basePath = '';
-        try {
-            const url = new URL(jiraUrl);
-            hostname = url.hostname;
-            basePath = url.pathname.replace(/\/$/, ''); // Remove trailing slash
-        }
-        catch (error) {
-            reject(new Error(`Invalid JIRA_URL: ${jiraUrl}`));
-            return;
-        }
-        const apiPath = `${basePath}/rest/api/3/issue`;
-        const auth = Buffer.from(`${jiraEmail}:${jiraApiToken}`).toString('base64');
-        // Convert description to Atlassian Document Format (ADF)
-        // JIRA API v3 requires ADF format for description field
-        const descriptionADF = convertTextToADF(description);
-        // Get current user's account ID for assignment
-        let accountId = null;
-        try {
-            accountId = await getCurrentUserAccountId(jiraUrl, jiraEmail, jiraApiToken);
-        }
-        catch (error) {
-            console.error('[JIRA] Failed to get current user account ID:', error);
-            // Continue without assignment if we can't get account ID
-        }
-        // Build fields object - start with required fields
-        const fields = {
-            summary,
-            description: descriptionADF,
-            project: {
-                key: project
-            },
-            issuetype: {
-                name: 'Task'
-            }
-        };
-        // Add assignee (the JIRA user) using accountId
-        // JIRA API v3 requires accountId for assignment
-        if (accountId) {
-            fields.assignee = {
-                accountId: accountId
-            };
-        }
-        // Only add components if provided and not empty
-        // Note: Component name must match exactly (case-sensitive) with existing component in JIRA
-        if (component && component.trim().length > 0) {
-            fields.components = [{ name: component.trim() }];
-        }
-        const requestData = JSON.stringify({
-            fields
-        });
-        const options = {
-            hostname,
-            path: apiPath,
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Basic ${auth}`,
-                'Content-Length': Buffer.byteLength(requestData)
-            }
-        };
-        const req = https.request(options, (res) => {
-            let data = '';
-            res.on('data', (chunk) => {
-                data += chunk;
-            });
-            res.on('end', () => {
-                if (res.statusCode === 201) {
-                    try {
-                        const issue = JSON.parse(data);
-                        resolve(issue);
-                    }
-                    catch (error) {
-                        reject(new Error('Failed to parse JIRA API response'));
-                    }
-                }
-                else {
-                    let errorMessage = `JIRA API returned status ${res.statusCode}`;
-                    try {
-                        const errorData = JSON.parse(data);
-                        if (errorData.errorMessages && errorData.errorMessages.length > 0) {
-                            errorMessage = errorData.errorMessages.join(', ');
-                        }
-                        else if (errorData.errors) {
-                            // JIRA v3 API uses 'errors' object for field-level errors
-                            const errorKeys = Object.keys(errorData.errors);
-                            const errorValues = errorKeys.map(key => `${key}: ${errorData.errors[key]}`);
-                            errorMessage = errorValues.join(', ');
-                        }
-                        else if (errorData.message) {
-                            errorMessage = errorData.message;
-                        }
-                        // Log the full error for debugging
-                        console.error('[JIRA] Full error response:', JSON.stringify(errorData, null, 2));
-                    }
-                    catch {
-                        // If parsing fails, use the raw data
-                        errorMessage = data.substring(0, 500);
-                    }
-                    // Log the request payload for debugging
-                    console.error('[JIRA] Request payload:', requestData);
-                    reject(new Error(errorMessage));
-                }
-            });
-        });
-        req.on('error', (error) => {
-            reject(error);
-        });
-        req.setTimeout(30000, () => {
-            req.destroy();
-            reject(new Error('Request timeout'));
-        });
-        req.write(requestData);
-        req.end();
-    });
-}
-/**
- * Converts plain text to Atlassian Document Format (ADF)
- * JIRA API v3 requires descriptions in ADF format
- * Simplified version to keep content size manageable
- */
-function convertTextToADF(text) {
-    if (!text || text.trim().length === 0) {
-        return {
-            type: 'doc',
-            version: 1,
-            content: []
-        };
-    }
-    const content = [];
-    // Split by {code} markers to separate regular text from code blocks
-    const parts = text.split(/{code}/);
-    let inCodeBlock = text.trim().startsWith('{code}');
-    for (let i = 0; i < parts.length; i++) {
-        const part = parts[i].trim();
-        if (!part) {
-            continue;
-        }
-        if (inCodeBlock) {
-            // This is code content - use codeBlock node
-            content.push({
-                type: 'codeBlock',
-                attrs: {
-                    language: 'text'
-                },
-                content: [
-                    {
-                        type: 'text',
-                        text: part
-                    }
-                ]
-            });
-        }
-        else {
-            // This is regular text - split into paragraphs
-            const paragraphs = part.split(/\n\n+/).filter(p => p.trim().length > 0);
-            for (const para of paragraphs) {
-                const lines = para.split('\n').filter(l => l.trim().length > 0);
-                if (lines.length === 0) {
-                    continue;
-                }
-                const paraContent = [];
-                lines.forEach((line, idx) => {
-                    paraContent.push({
-                        type: 'text',
-                        text: line
-                    });
-                    if (idx < lines.length - 1) {
-                        paraContent.push({
-                            type: 'hardBreak'
-                        });
-                    }
-                });
-                content.push({
-                    type: 'paragraph',
-                    content: paraContent
-                });
-            }
-        }
-        // Toggle code block state after each part
-        inCodeBlock = !inCodeBlock;
-    }
-    // If no content was created, add an empty paragraph
-    if (content.length === 0) {
-        content.push({
-            type: 'paragraph',
-            content: []
-        });
-    }
-    return {
-        type: 'doc',
-        version: 1,
-        content: content
-    };
-}
-/**
- * Fetches all accessible JIRA projects
- */
-async function getJiraProjects() {
-    return new Promise((resolve, reject) => {
-        const jiraUrl = process.env.JIRA_URL || 'https://poly-ai.atlassian.net';
-        const jiraEmail = process.env.JIRA_USER;
-        const jiraApiToken = process.env.JIRA_API_TOKEN;
-        if (!jiraEmail || !jiraApiToken) {
-            reject(new Error('JIRA_USER and JIRA_API_TOKEN environment variables are required'));
-            return;
-        }
-        let hostname;
-        let basePath = '';
-        try {
-            const url = new URL(jiraUrl);
-            hostname = url.hostname;
-            basePath = url.pathname.replace(/\/$/, '');
-        }
-        catch (error) {
-            reject(new Error(`Invalid JIRA_URL: ${jiraUrl}`));
-            return;
-        }
-        const apiPath = `${basePath}/rest/api/3/project`;
-        const auth = Buffer.from(`${jiraEmail}:${jiraApiToken}`).toString('base64');
-        const options = {
-            hostname,
-            path: apiPath,
-            method: 'GET',
-            headers: {
-                'Authorization': `Basic ${auth}`,
-                'Accept': 'application/json'
-            }
-        };
-        const req = https.request(options, (res) => {
-            let data = '';
-            res.on('data', (chunk) => {
-                data += chunk;
-            });
-            res.on('end', () => {
-                if (res.statusCode === 200) {
-                    try {
-                        const projects = JSON.parse(data);
-                        resolve(projects);
-                    }
-                    catch (error) {
-                        reject(new Error('Failed to parse JIRA API response'));
-                    }
-                }
-                else {
-                    reject(new Error(`JIRA API returned status ${res.statusCode}`));
-                }
-            });
-        });
-        req.on('error', (error) => {
-            reject(error);
-        });
-        req.setTimeout(30000, () => {
-            req.destroy();
-            reject(new Error('Request timeout'));
-        });
-        req.end();
-    });
-}
-/**
- * Fetches components for a specific JIRA project
- */
-async function getJiraComponents(projectKey) {
-    return new Promise((resolve, reject) => {
-        const jiraUrl = process.env.JIRA_URL || 'https://poly-ai.atlassian.net';
-        const jiraEmail = process.env.JIRA_USER;
-        const jiraApiToken = process.env.JIRA_API_TOKEN;
-        if (!jiraEmail || !jiraApiToken) {
-            reject(new Error('JIRA_USER and JIRA_API_TOKEN environment variables are required'));
-            return;
-        }
-        let hostname;
-        let basePath = '';
-        try {
-            const url = new URL(jiraUrl);
-            hostname = url.hostname;
-            basePath = url.pathname.replace(/\/$/, '');
-        }
-        catch (error) {
-            reject(new Error(`Invalid JIRA_URL: ${jiraUrl}`));
-            return;
-        }
-        const apiPath = `${basePath}/rest/api/3/project/${projectKey}`;
-        const auth = Buffer.from(`${jiraEmail}:${jiraApiToken}`).toString('base64');
-        const options = {
-            hostname,
-            path: apiPath,
-            method: 'GET',
-            headers: {
-                'Authorization': `Basic ${auth}`,
-                'Accept': 'application/json'
-            }
-        };
-        const req = https.request(options, (res) => {
-            let data = '';
-            res.on('data', (chunk) => {
-                data += chunk;
-            });
-            res.on('end', () => {
-                if (res.statusCode === 200) {
-                    try {
-                        const project = JSON.parse(data);
-                        const components = (project.components || []);
-                        resolve(components);
-                    }
-                    catch (error) {
-                        reject(new Error('Failed to parse JIRA API response'));
-                    }
-                }
-                else {
-                    reject(new Error(`JIRA API returned status ${res.statusCode}`));
-                }
-            });
-        });
-        req.on('error', (error) => {
-            reject(error);
-        });
-        req.setTimeout(30000, () => {
-            req.destroy();
-            reject(new Error('Request timeout'));
-        });
-        req.end();
-    });
-}
-/**
- * Gets the JIRA ticket URL from a ticket key
- */
-function getJiraTicketUrl(ticketKey) {
-    const jiraUrl = process.env.JIRA_URL || 'https://poly-ai.atlassian.net';
-    return `${jiraUrl.replace(/\/$/, '')}/browse/${ticketKey}`;
-}
-
-
-/***/ }),
-/* 37 */
-/***/ ((module) => {
-
-module.exports = require("https");
-
-/***/ }),
-/* 38 */
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
-
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getCurrentBranch = getCurrentBranch;
-exports.getBranchDiff = getBranchDiff;
-exports.getChangedFiles = getChangedFiles;
-exports.getProjectDirectory = getProjectDirectory;
-exports.formatDiffForJira = formatDiffForJira;
-exports.getProjectName = getProjectName;
-exports.createSummaryFromBranch = createSummaryFromBranch;
-const child_process_1 = __webpack_require__(39);
-const util_1 = __webpack_require__(40);
-const path = __importStar(__webpack_require__(2));
-const fs = __importStar(__webpack_require__(3));
-// @ts-ignore - js-yaml types may not be available
-const yaml = __importStar(__webpack_require__(4));
-const execAsync = (0, util_1.promisify)(child_process_1.exec);
-/**
- * Gets the current git branch name
- */
-async function getCurrentBranch(workspaceRoot) {
-    try {
-        const { stdout } = await execAsync('git rev-parse --abbrev-ref HEAD', {
-            cwd: workspaceRoot
-        });
-        return stdout.trim();
-    }
-    catch (error) {
-        throw new Error('Failed to get current branch. Make sure you are in a git repository.');
-    }
-}
-/**
- * Gets the diff between the current branch and the base branch (usually main/master)
- */
-async function getBranchDiff(workspaceRoot, branch, baseBranch = 'main') {
-    try {
-        // Try to get diff with main first, fallback to master
-        let diff = '';
-        try {
-            const { stdout } = await execAsync(`git diff ${baseBranch}...${branch}`, {
-                cwd: workspaceRoot,
-                maxBuffer: 10 * 1024 * 1024 // 10MB buffer
-            });
-            diff = stdout;
-        }
-        catch {
-            // Try with master if main doesn't exist
-            if (baseBranch === 'main') {
-                const { stdout } = await execAsync(`git diff master...${branch}`, {
-                    cwd: workspaceRoot,
-                    maxBuffer: 10 * 1024 * 1024
-                });
-                diff = stdout;
-            }
-            else {
-                throw new Error('Failed to get diff');
-            }
-        }
-        return diff;
-    }
-    catch (error) {
-        throw new Error('Failed to get branch diff. Make sure the base branch exists.');
-    }
-}
-/**
- * Gets the list of changed files in the current branch
- */
-async function getChangedFiles(workspaceRoot, branch, baseBranch = 'main') {
-    try {
-        let files = [];
-        try {
-            const { stdout } = await execAsync(`git diff --name-only ${baseBranch}...${branch}`, {
-                cwd: workspaceRoot
-            });
-            files = stdout.trim().split('\n').filter(f => f.length > 0);
-        }
-        catch {
-            // Try with master if main doesn't exist
-            if (baseBranch === 'main') {
-                const { stdout } = await execAsync(`git diff --name-only master...${branch}`, {
-                    cwd: workspaceRoot
-                });
-                files = stdout.trim().split('\n').filter(f => f.length > 0);
-            }
-            else {
-                throw new Error('Failed to get changed files');
-            }
-        }
-        return files;
-    }
-    catch (error) {
-        throw new Error('Failed to get changed files');
-    }
-}
-/**
- * Finds all project.yaml files in the workspaces
- */
-function findAllProjectYamlFiles(workspaceRoot) {
-    const projectYamlFiles = [];
-    function searchDirectory(dir, depth = 0, maxDepth = 5) {
-        if (depth > maxDepth) {
-            return;
-        }
-        try {
-            const entries = fs.readdirSync(dir, { withFileTypes: true });
-            for (const entry of entries) {
-                const fullPath = path.join(dir, entry.name);
-                if (entry.isDirectory()) {
-                    // Recursively search subdirectories
-                    searchDirectory(fullPath, depth + 1, maxDepth);
-                }
-                else if (entry.isFile() && entry.name === 'project.yaml') {
-                    // Found a project.yaml file
-                    const relativePath = path.relative(workspaceRoot, fullPath);
-                    projectYamlFiles.push(relativePath);
-                }
-            }
-        }
-        catch (error) {
-            // Skip directories we can't read
-        }
-    }
-    searchDirectory(workspaceRoot);
-    return projectYamlFiles;
-}
-/**
- * Checks if a changed file is in the same directory or a subdirectory of a project.yaml file
- */
-function isFileInProjectDirectory(changedFile, projectYamlPath) {
-    const changedFileDir = path.dirname(changedFile);
-    const projectYamlDir = path.dirname(projectYamlPath);
-    // Check if changed file is in the same directory or a subdirectory
-    return changedFileDir === projectYamlDir || changedFileDir.startsWith(projectYamlDir + path.sep);
-}
-/**
- * Determines which account and project directories the changes are in
- * Detection is based on finding project.yaml files and checking if changed files
- * are in the same directory or subdirectories of those project.yaml files
- *
- * Structure: account_dir/project_dir/project.yaml
- *
- * Returns both account and project directory, prioritizing project directory for caching
- */
-function getProjectDirectory(changedFiles, workspaceRoot) {
-    const accountDirs = new Set();
-    const projectDirs = new Set();
-    // Find all project.yaml files in the workspace
-    const projectYamlFiles = findAllProjectYamlFiles(workspaceRoot);
-    if (projectYamlFiles.length === 0) {
-        return {
-            accountDir: null,
-            projectDir: null
-        };
-    }
-    // For each changed file, check if it's in a directory with a project.yaml
-    for (const changedFile of changedFiles) {
-        for (const projectYamlFile of projectYamlFiles) {
-            if (isFileInProjectDirectory(changedFile, projectYamlFile)) {
-                // Extract account_dir and project_dir from project.yaml path
-                // Structure: account_dir/project_dir/project.yaml
-                // account_dir is the parent of project_dir
-                const parts = projectYamlFile.split(path.sep);
-                if (parts.length >= 2) {
-                    const projectDirName = parts[parts.length - 2]; // Directory containing project.yaml
-                    const accountDir = parts[parts.length - 3]; // Parent directory of project_dir
-                    if (accountDir && projectDirName) {
-                        accountDirs.add(accountDir);
-                        // Store as "account/project" for unique identification
-                        projectDirs.add(`${accountDir}/${projectDirName}`);
-                    }
-                }
-            }
-        }
-    }
-    // Prioritize project directory (more specific)
-    // If we found exactly one project directory, return it
-    if (projectDirs.size === 1) {
-        const projectDir = Array.from(projectDirs)[0];
-        const [accountDir] = projectDir.split('/');
-        return {
-            accountDir: accountDir,
-            projectDir: projectDir
-        };
-    }
-    // If we found exactly one account directory, return it
-    if (accountDirs.size === 1) {
-        return {
-            accountDir: Array.from(accountDirs)[0],
-            projectDir: null
-        };
-    }
-    // If multiple or none, return null (user will need to specify)
-    return {
-        accountDir: null,
-        projectDir: null
-    };
-}
-/**
- * Formats the diff into a readable description for JIRA
- * Reduced maxLength to avoid CONTENT_LIMIT_EXCEEDED errors
- */
-function formatDiffForJira(diff, maxLength = 15000) {
-    // Truncate if too long - JIRA has content limits
-    let formatted = diff;
-    if (formatted.length > maxLength) {
-        formatted = formatted.substring(0, maxLength) + '\n\n... (diff truncated due to size limit)';
-    }
-    // Escape any special characters that might break JIRA formatting
-    // JIRA uses {code} blocks for code
-    return `{code}\n${formatted}\n{code}`;
-}
-/**
- * Reads the project name from project.yaml file
- * Returns the project name or null if not found
- */
-function getProjectName(workspaceRoot, accountDir, projectDirName) {
-    try {
-        const projectYamlPath = path.join(workspaceRoot, accountDir, projectDirName, 'project.yaml');
-        if (!fs.existsSync(projectYamlPath)) {
-            return null;
-        }
-        const content = fs.readFileSync(projectYamlPath, 'utf8');
-        const projectData = yaml.load(content);
-        // Try common field names for project name
-        return projectData?.name || projectData?.project_name || projectData?.projectName || null;
-    }
-    catch (error) {
-        // If parsing fails, return null
-        return null;
-    }
-}
-/**
- * Creates a summary from the branch name and changed files
- */
-function createSummaryFromBranch(branch, changedFiles) {
-    const fileCount = changedFiles.length;
-    const summary = `Changes from branch: ${branch}`;
-    return summary;
-}
-
-
-/***/ }),
-/* 39 */
-/***/ ((module) => {
-
-module.exports = require("child_process");
-
-/***/ }),
-/* 40 */
-/***/ ((module) => {
-
-module.exports = require("util");
-
-/***/ }),
-/* 41 */
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
-
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getGitHubRepo = getGitHubRepo;
-exports.findPRForBranch = findPRForBranch;
-exports.updatePRDescription = updatePRDescription;
-const https = __importStar(__webpack_require__(37));
-const child_process_1 = __webpack_require__(39);
-const util_1 = __webpack_require__(40);
-const execAsync = (0, util_1.promisify)(child_process_1.exec);
-/**
- * Gets the GitHub repository owner and name from the current git repository
- */
-async function getGitHubRepo(workspaceRoot) {
-    try {
-        const { stdout } = await execAsync('git remote get-url origin', {
-            cwd: workspaceRoot
-        });
-        const remoteUrl = stdout.trim();
-        // Parse different git remote URL formats
-        // https://github.com/owner/repo.git
-        // https://github.com/owner/repo
-        // git@github.com:owner/repo.git
-        const httpsMatch = remoteUrl.match(/github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?$/);
-        if (httpsMatch) {
-            return {
-                owner: httpsMatch[1],
-                repo: httpsMatch[2]
-            };
-        }
-        return null;
-    }
-    catch (error) {
-        return null;
-    }
-}
-/**
- * Finds a PR associated with the current branch
- */
-async function findPRForBranch(owner, repo, branch) {
-    return new Promise((resolve, reject) => {
-        const githubToken = process.env.GITHUB_ACCESS_TOKEN;
-        if (!githubToken) {
-            reject(new Error('GITHUB_ACCESS_TOKEN environment variable is required'));
-            return;
-        }
-        const apiPath = `/repos/${owner}/${repo}/pulls?head=${owner}:${branch}&state=open`;
-        const options = {
-            hostname: 'api.github.com',
-            path: apiPath,
-            method: 'GET',
-            headers: {
-                'User-Agent': 'adk-extension',
-                'Accept': 'application/vnd.github.v3+json',
-                'Authorization': `Bearer ${githubToken}`
-            }
-        };
-        const req = https.request(options, (res) => {
-            let data = '';
-            res.on('data', (chunk) => {
-                data += chunk;
-            });
-            res.on('end', () => {
-                if (res.statusCode === 200) {
-                    try {
-                        const prs = JSON.parse(data);
-                        if (prs.length > 0) {
-                            resolve(prs[0]); // Return the first open PR
-                        }
-                        else {
-                            resolve(null);
-                        }
-                    }
-                    catch (error) {
-                        reject(new Error('Failed to parse GitHub API response'));
-                    }
-                }
-                else if (res.statusCode === 404) {
-                    resolve(null);
-                }
-                else {
-                    reject(new Error(`GitHub API returned status ${res.statusCode}`));
-                }
-            });
-        });
-        req.on('error', (error) => {
-            reject(error);
-        });
-        req.setTimeout(10000, () => {
-            req.destroy();
-            reject(new Error('Request timeout'));
-        });
-        req.end();
-    });
-}
-/**
- * Updates a PR description with JIRA ticket information
- */
-async function updatePRDescription(owner, repo, prNumber, jiraTicketUrl, jiraTicketKey) {
-    return new Promise((resolve, reject) => {
-        const githubToken = process.env.GITHUB_ACCESS_TOKEN;
-        if (!githubToken) {
-            reject(new Error('GITHUB_ACCESS_TOKEN environment variable is required'));
-            return;
-        }
-        // First, get the current PR to preserve existing description
-        const getOptions = {
-            hostname: 'api.github.com',
-            path: `/repos/${owner}/${repo}/pulls/${prNumber}`,
-            method: 'GET',
-            headers: {
-                'User-Agent': 'adk-extension',
-                'Accept': 'application/vnd.github.v3+json',
-                'Authorization': `Bearer ${githubToken}`
-            }
-        };
-        const getReq = https.request(getOptions, (getRes) => {
-            let data = '';
-            getRes.on('data', (chunk) => {
-                data += chunk;
-            });
-            getRes.on('end', () => {
-                if (getRes.statusCode !== 200) {
-                    reject(new Error(`Failed to get PR: ${getRes.statusCode}`));
-                    return;
-                }
-                try {
-                    const pr = JSON.parse(data);
-                    let updatedBody = pr.body || '';
-                    // Check if JIRA ticket link already exists
-                    if (updatedBody.includes(jiraTicketKey) || updatedBody.includes(jiraTicketUrl)) {
-                        // Already exists, no need to update
-                        resolve();
-                        return;
-                    }
-                    // Add JIRA ticket link to description
-                    const jiraSection = `\n\n## JIRA Ticket\n${jiraTicketKey}: ${jiraTicketUrl}`;
-                    updatedBody = updatedBody + jiraSection;
-                    // Update the PR
-                    const updateOptions = {
-                        hostname: 'api.github.com',
-                        path: `/repos/${owner}/${repo}/pulls/${prNumber}`,
-                        method: 'PATCH',
-                        headers: {
-                            'User-Agent': 'adk-extension',
-                            'Accept': 'application/vnd.github.v3+json',
-                            'Authorization': `Bearer ${githubToken}`,
-                            'Content-Type': 'application/json',
-                            'Content-Length': Buffer.byteLength(JSON.stringify({ body: updatedBody }))
-                        }
-                    };
-                    const updateReq = https.request(updateOptions, (updateRes) => {
-                        let updateData = '';
-                        updateRes.on('data', (chunk) => {
-                            updateData += chunk;
-                        });
-                        updateRes.on('end', () => {
-                            if (updateRes.statusCode === 200) {
-                                resolve();
-                            }
-                            else {
-                                reject(new Error(`Failed to update PR: ${updateRes.statusCode}`));
-                            }
-                        });
-                    });
-                    updateReq.on('error', (error) => {
-                        reject(error);
-                    });
-                    updateReq.setTimeout(10000, () => {
-                        updateReq.destroy();
-                        reject(new Error('Request timeout'));
-                    });
-                    updateReq.write(JSON.stringify({ body: updatedBody }));
-                    updateReq.end();
-                }
-                catch (error) {
-                    reject(new Error('Failed to parse PR data'));
-                }
-            });
-        });
-        getReq.on('error', (error) => {
-            reject(error);
-        });
-        getReq.setTimeout(10000, () => {
-            getReq.destroy();
-            reject(new Error('Request timeout'));
-        });
-        getReq.end();
-    });
-}
-
-
-/***/ }),
-/* 42 */
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
-
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.AgentStudioLinter = void 0;
 const vscode = __importStar(__webpack_require__(1));
 const path = __importStar(__webpack_require__(2));
 const fs = __importStar(__webpack_require__(3));
 const pythonFunctionResolver_1 = __webpack_require__(34);
 const debug_1 = __webpack_require__(35);
-const pythonRules_1 = __webpack_require__(43);
-const yamlRules_1 = __webpack_require__(44);
-const config_1 = __webpack_require__(45);
+const pythonRules_1 = __webpack_require__(37);
+const yamlRules_1 = __webpack_require__(38);
+const config_1 = __webpack_require__(39);
 /**
  * Agent Studio Linter
  * Provides real-time diagnostics for Agent Studio projects based on cursor rules
@@ -7638,7 +6554,7 @@ class AgentStudioLinter {
         // Add to subscriptions
         context.subscriptions.push(this.diagnosticCollection);
         this.disposables.forEach(d => context.subscriptions.push(d));
-        (0, debug_1.debugLog)('Agent Deployment Kit Linter activated');
+        (0, debug_1.debugLog)('Agent Development Kit Linter activated');
     }
     /**
      * Re-lints all currently open documents (used when .adkrc or .lasrc changes)
@@ -7797,7 +6713,7 @@ exports.AgentStudioLinter = AgentStudioLinter;
 
 
 /***/ }),
-/* 43 */
+/* 37 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -8711,7 +7627,7 @@ function checkGotoFlowExists(lines, filePath, overrideFlowNames) {
 
 
 /***/ }),
-/* 44 */
+/* 38 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -9137,7 +8053,7 @@ function findYamlKeyLine(lines, key) {
 
 
 /***/ }),
-/* 45 */
+/* 39 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 

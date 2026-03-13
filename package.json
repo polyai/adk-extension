@@ -32,6 +32,11 @@
         "icon": "$(graph)"
       },
       {
+        "command": "adk-extension.createFlow",
+        "title": "ADK: Create New Flow",
+        "icon": "$(new-folder)"
+      },
+      {
         "command": "adk-extension.toggleDebugMode",
         "title": "ADK: Toggle Debug Mode",
         "icon": "$(debug)"
@@ -44,12 +49,23 @@
           "when": "explorerResourceIsFolder",
           "group": "navigation",
           "icon": "$(graph)"
+        },
+        {
+          "command": "adk-extension.createFlow",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation",
+          "icon": "$(new-folder)"
         }
       ],
       "commandPalette": [
         {
           "command": "adk-extension.viewFlow",
           "title": "ADK: View Flow",
+          "category": "Agent Development Kit Extension"
+        },
+        {
+          "command": "adk-extension.createFlow",
+          "title": "ADK: Create New Flow",
           "category": "Agent Development Kit Extension"
         },
         {
@@ -61,8 +77,9 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "yarn run package",
-    "compile": "webpack",
+    "vscode:prepublish": "yarn run copy-libs && yarn run package",
+    "copy-libs": "mkdir -p src/lib && cp node_modules/@joint/core/dist/joint.min.js src/lib/ && cp node_modules/@dagrejs/dagre/dist/dagre.min.js src/lib/ && cp node_modules/@dagrejs/graphlib/dist/graphlib.min.js src/lib/ && cp node_modules/@joint/layout-directed-graph/dist/DirectedGraph.min.js src/lib/ && cp node_modules/@msagl/core/dist.min.js src/lib/msagl-core.min.js && cp node_modules/@joint/layout-msagl/dist/umd/index.min.js src/lib/msagl-layout.min.js",
+    "compile": "yarn run copy-libs && webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
@@ -73,6 +90,10 @@
     "semantic-release": "semantic-release"
   },
   "dependencies": {
+    "@joint/core": "^4.2.4",
+    "@joint/layout-directed-graph": "^4.2.3",
+    "@joint/layout-msagl": "^4.2.3",
+    "@joint/layout-msagl": "^4.2.3",
     "js-yaml": "^4.1.0"
   },
   "devDependencies": {

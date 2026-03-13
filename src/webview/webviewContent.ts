@@ -9,12 +9,20 @@ export function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.
 	// Load HTML content from the extension directory
 	const htmlPath = path.join(extensionUri.fsPath, 'src', 'flowViewer.html');
 	let htmlContent = fs.readFileSync(htmlPath, 'utf8');
+
+	// Replace CDN script URLs with local webview URIs for offline support
+	const jointUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'joint.min.js')));
+	const graphlibUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'graphlib.min.js')));
+	const dagreUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'dagre.min.js')));
+	const directedGraphUri = webview.asWebviewUri(vscode.Uri.file(path.join(extensionUri.fsPath, 'src', 'lib', 'DirectedGraph.min.js')));
+	htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@joint/core/dist/joint.min.js', jointUri.toString());
+	htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@dagrejs/graphlib/dist/graphlib.min.js', graphlibUri.toString());
+	htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@dagrejs/dagre/dist/dagre.min.js', dagreUri.toString());
+	htmlContent = htmlContent.replace('https://cdn.jsdelivr.net/npm/@joint/layout-directed-graph/dist/DirectedGraph.min.js', directedGraphUri.toString());
 	
 	// Add CSP meta tag if not present
 	const cspSource = webview.cspSource;
-	// Note: VS Code adds its own CSP, so we need to ensure our CSP allows what we need
-	// The CSP needs to allow: scripts from unpkg, inline scripts, and connections to unpkg
-	const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${cspSource} https://*.vscode-cdn.net https://unpkg.com 'unsafe-inline' 'unsafe-eval'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource} https: data:; connect-src ${cspSource} https://*.vscode-cdn.net https://unpkg.com; font-src ${cspSource} https: data:;">`;
+	const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${cspSource} 'unsafe-inline' 'unsafe-eval'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource} https: data:; font-src ${cspSource} https: data:;">`;
 	
 	// Replace existing CSP or insert new one
 	if (htmlContent.includes('Content-Security-Policy')) {

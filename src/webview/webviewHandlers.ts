@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
-import { FlowParser, Entity } from '../flowParser';
+import { FlowParser, Entity, VariantAttributeDefinition } from '../flowParser';
 import { extractFunctionReferences, areFunctionSetsEqual } from '../utils/functionUtils';
 
 /**
@@ -65,6 +65,15 @@ export class WebviewMessageHandler {
 	}
 
 	/**
+	 * Gets the path to the variant_attributes.yaml file (same config dir as entities).
+	 */
+	private getVariantAttributesFilePath(): string | null {
+		const entitiesPath = this.getEntitiesFilePath();
+		if (!entitiesPath) return null;
+		return path.join(path.dirname(entitiesPath), 'variant_attributes.yaml');
+	}
+
+	/**
 	 * Sets the current flow graph data
 	 */
 	setFlowGraphData(data: any) {
@@ -94,11 +103,17 @@ export class WebviewMessageHandler {
 			case 'saveEntities':
 				await this.handleSaveEntities(message.entities);
 				break;
+			case 'saveVariantAttributes':
+				await this.handleSaveVariantAttributes(message.attributes);
+				break;
 			case 'createStep':
 				await this.handleCreateStep(message.stepName, message.stepType, message.forCondition);
 				break;
 			case 'deleteStep':
 				await this.handleDeleteStep(message.nodeId, message.filePath);
+				break;
+			case 'setStartStep':
+				await this.handleSetStartStep(message.nodeId);
 				break;
 			case 'showError':
 				vscode.window.showErrorMessage(message.message);
@@ -272,7 +287,7 @@ export class WebviewMessageHandler {
 			fs.writeFileSync(entitiesFilePath, yamlContent, 'utf8');
 			
 			// Show success message
-			vscode.window.showInformationMessage(`Entities saved successfully (${entities.length} entities)`);
+			vscode.window.showInformationMessage('Entity saved');
 			
 			// Reload the flow to update entities in the graph
 			const parser = new FlowParser(this.flowDir);
@@ -301,6 +316,73 @@ export class WebviewMessageHandler {
 				success: false,
 				error: errorMessage
 			});
+		}
+	}
+
+	private async handleSaveVariantAttributes(attributes: VariantAttributeDefinition[]): Promise<void> {
+		try {
+			const filePath = this.getVariantAttributesFilePath();
+			if (!filePath) {
+				vscode.window.showErrorMessage('Could not find variant_attributes.yaml file location');
+				return;
+			}
+			const configDir = path.dirname(filePath);
+			if (!fs.existsSync(configDir)) {
+				fs.mkdirSync(configDir, { recursive: true });
+			}
+			const data = { attributes };
+			const yamlContent = yaml.dump(data, {
+				indent: 2,
+				lineWidth: 100,
+				noRefs: true,
+				quotingType: '"',
+				forceQuotes: false
+			});
+			fs.writeFileSync(filePath, yamlContent, 'utf8');
+			vscode.window.showInformationMessage('Variant attribute saved');
+			const parser = new FlowParser(this.flowDir);
+			const updatedFlowGraph = await parser.parseFlow();
+			this.flowGraphData = updatedFlowGraph;
+			this.panel.webview.postMessage({ command: 'loadFlow', flowGraph: updatedFlowGraph });
+			this.panel.webview.postMessage({ command: 'variantAttributesSaved', success: true });
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			vscode.window.showErrorMessage(`Error saving variant attributes: ${errorMessage}`);
+			console.error('Error saving variant attributes:', error);
+			this.panel.webview.postMessage({ command: 'variantAttributesSaved', success: false, error: errorMessage });
+		}
+	}
+
+	private async handleSetStartStep(nodeId: string): Promise<void> {
+		try {
+			const configPath = path.join(this.flowDir, 'flow_config.yaml');
+			if (!fs.existsSync(configPath)) {
+				vscode.window.showErrorMessage('flow_config.yaml not found');
+				return;
+			}
+			const content = fs.readFileSync(configPath, 'utf8');
+			const config = yaml.load(content) as { name?: string; description?: string; start_step?: string; [key: string]: unknown };
+			if (!config || typeof config !== 'object') {
+				vscode.window.showErrorMessage('Invalid flow_config.yaml');
+				return;
+			}
+			config.start_step = nodeId;
+			const yamlContent = yaml.dump(config, {
+				indent: 2,
+				lineWidth: 100,
+				noRefs: true,
+				quotingType: '"',
+				forceQuotes: false
+			});
+			fs.writeFileSync(configPath, yamlContent, 'utf8');
+			vscode.window.showInformationMessage('Start step updated');
+			const parser = new FlowParser(this.flowDir);
+			const updatedFlowGraph = await parser.parseFlow();
+			this.flowGraphData = updatedFlowGraph;
+			this.panel.webview.postMessage({ command: 'loadFlow', flowGraph: updatedFlowGraph });
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			vscode.window.showErrorMessage(`Error updating start step: ${errorMessage}`);
 		}
 	}
 
