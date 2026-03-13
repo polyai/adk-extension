@@ -1,3 +1,9 @@
+## [1.1.0](https://github.com/polyai/adk-extension/compare/v1.0.1...v1.1.0) (2026-03-13)
+
+### Features
+
+* **flow-viewer:** flow diagram, attributes, variables, and start step UX ([#15](https://github.com/polyai/adk-extension/issues/15)) ([25ef505](https://github.com/polyai/adk-extension/commit/25ef50572a03c09e92a62da7488e8f5fcf6060f2))
+
 ## [1.0.1](https://github.com/polyai/adk-extension/compare/v1.0.0...v1.0.1) (2026-03-11)
 
 ### Bug Fixes

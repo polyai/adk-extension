@@ -2,7 +2,7 @@
   "name": "adk-extension",
   "displayName": "Agent Development Kit Extension",
   "description": "Extension for the Agent Development Kit. Contains useful commands and tools for agent development.",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "publisher": "PolyAI",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -92,7 +92,6 @@
   "dependencies": {
     "@joint/core": "^4.2.4",
     "@joint/layout-directed-graph": "^4.2.3",
-    "@joint/layout-msagl": "^4.2.3",
     "@joint/layout-msagl": "^4.2.3",
     "js-yaml": "^4.1.0"
   },
