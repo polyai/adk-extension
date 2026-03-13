@@ -4337,24 +4337,22 @@ class FlowParser {
         const flowFunctions = await this.parseFlowFunctions();
         const globalFunctions = await this.parseGlobalFunctions();
         const entities = await this.parseEntities();
+        const variantAttributeDefinitions = await this.parseVariantAttributeDefinitions();
+        const variantAttributes = variantAttributeDefinitions.map((a) => a.name);
+        const variables = await this.discoverVariables();
         console.log(`Parsing flow: ${config.name}`);
         console.log(`Found ${steps.size} steps:`, Array.from(steps.keys()));
         console.log(`Found ${functionSteps.size} function steps:`, Array.from(functionSteps.keys()));
         console.log(`Found ${flowFunctions.size} flow functions:`, Array.from(flowFunctions.keys()));
         console.log(`Found ${globalFunctions.size} global functions:`, Array.from(globalFunctions.keys()));
         console.log(`Found ${entities.length} entities:`, entities.map(e => e.name));
+        console.log(`Found ${variantAttributes.length} variant attributes:`, variantAttributes);
+        console.log(`Variant attribute definitions:`, variantAttributeDefinitions.length);
+        console.log(`Found ${variables.length} variables:`, variables);
         const nodes = [];
         const edges = [];
         const nodeMap = new Map();
-        // Add start node
-        const startNode = {
-            id: 'start',
-            label: 'Start',
-            type: 'end',
-            details: `Flow: ${config.name}\n${config.description || ''}\n\nStart Step: ${config.start_step || 'N/A'}`
-        };
-        nodes.push(startNode);
-        nodeMap.set('start', startNode);
+        // No separate start node; start step is indicated by config.start_step (green circle in viewer)
         // Add exit node (steps that call conv.exit_flow() transition here)
         const exitNode = {
             id: 'exit',
@@ -4397,14 +4395,6 @@ class FlowParser {
         }
         // Don't create function nodes - functions will be shown as clickable links in step details
         // Store function info for step details and transitions
-        // Add edge from start to first step
-        if (config.start_step && nodeMap.has(config.start_step)) {
-            edges.push({
-                from: 'start',
-                to: config.start_step,
-                label: 'start'
-            });
-        }
         // Parse transitions from step prompts
         // Functions are not shown as nodes, but we create edges directly to target steps if functions have goto_step
         for (const [stepName, stepData] of steps.entries()) {
@@ -4555,8 +4545,98 @@ class FlowParser {
                 type: 'global-function',
                 filePath: this.getGlobalFunctionPath(name)
             })),
-            entities
+            entities,
+            variantAttributes,
+            variantAttributeDefinitions,
+            variables
         };
+    }
+    /** Get project root (directory containing config/). */
+    getProjectRoot() {
+        let currentDir = this.flowDir;
+        while (currentDir !== path.dirname(currentDir)) {
+            const parentDir = path.dirname(currentDir);
+            const dirName = path.basename(currentDir);
+            if (dirName === 'flows' || path.basename(parentDir) === 'flows') {
+                currentDir = parentDir;
+                continue;
+            }
+            const configDir = path.join(currentDir, 'config');
+            if (fs.existsSync(configDir)) {
+                return currentDir;
+            }
+            currentDir = parentDir;
+        }
+        return null;
+    }
+    /**
+     * Parse config/variant_attributes.yaml and return full definitions for the attributes panel.
+     * Format: attributes: [ { name: attribute_name, values: { variant_name: value, ... } }, ... ]
+     */
+    async parseVariantAttributeDefinitions() {
+        const projectRoot = this.getProjectRoot();
+        if (!projectRoot)
+            return [];
+        const attrPath = path.join(projectRoot, 'config', 'variant_attributes.yaml');
+        if (!fs.existsSync(attrPath)) {
+            console.warn('variant_attributes.yaml not found at', attrPath);
+            return [];
+        }
+        try {
+            const content = fs.readFileSync(attrPath, 'utf8');
+            const parsed = yaml.load(content);
+            if (!parsed || typeof parsed !== 'object')
+                return [];
+            const attrs = parsed.attributes;
+            if (attrs === undefined || attrs === null || !Array.isArray(attrs))
+                return [];
+            return attrs
+                .filter((v) => v && typeof v === 'object' && typeof v.name === 'string')
+                .map((v) => ({
+                name: String(v.name).trim(),
+                values: v.values && typeof v.values === 'object' ? { ...v.values } : {}
+            }))
+                .filter((a) => a.name.length > 0);
+        }
+        catch (error) {
+            console.error('Error parsing variant_attributes.yaml:', error);
+        }
+        return [];
+    }
+    /** Search codebase for conv.state.<variable_name> and return unique variable names for {{vrbl:name}}. */
+    async discoverVariables() {
+        const projectRoot = this.getProjectRoot();
+        if (!projectRoot)
+            return [];
+        const convStateRe = /conv\.state\.([a-zA-Z_][a-zA-Z0-9_]*)/g;
+        const seen = new Set();
+        const searchDir = (dir) => {
+            if (!fs.existsSync(dir))
+                return;
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const e of entries) {
+                const full = path.join(dir, e.name);
+                if (e.isDirectory()) {
+                    if (e.name !== 'node_modules' && e.name !== '.git' && e.name !== '__pycache__') {
+                        searchDir(full);
+                    }
+                }
+                else if (e.isFile() && (e.name.endsWith('.py') || e.name.endsWith('.yaml') || e.name.endsWith('.yml'))) {
+                    try {
+                        const content = fs.readFileSync(full, 'utf8');
+                        let m;
+                        while ((m = convStateRe.exec(content)) !== null) {
+                            seen.add(m[1]);
+                        }
+                    }
+                    catch {
+                        // ignore read errors
+                    }
+                }
+            }
+        };
+        searchDir(projectRoot);
+        return Array.from(seen).sort();
     }
     async parseConfig() {
         const configPath = path.join(this.flowDir, 'flow_config.yaml');
@@ -4662,33 +4742,11 @@ class FlowParser {
         return functions;
     }
     async parseEntities() {
-        // Find project root to locate config/entities.yaml
-        // Project root is the parent of the 'flows' directory
-        let currentDir = this.flowDir;
-        let projectRoot = null;
-        // Go up the directory tree to find the project root (parent of flows directory)
-        while (currentDir !== path.dirname(currentDir)) {
-            const parentDir = path.dirname(currentDir);
-            const dirName = path.basename(currentDir);
-            // If we're in a flow directory inside 'flows', the project root is the parent of 'flows'
-            if (dirName === 'flows' || path.basename(parentDir) === 'flows') {
-                // Keep going up to find project root
-                currentDir = parentDir;
-                continue;
-            }
-            // Check if this directory has a config folder
-            const configDir = path.join(currentDir, 'config');
-            if (fs.existsSync(configDir)) {
-                projectRoot = currentDir;
-                break;
-            }
-            currentDir = parentDir;
-        }
+        const projectRoot = this.getProjectRoot();
         if (!projectRoot) {
             console.warn('Could not find project root with config directory');
             return [];
         }
-        console.log('Found project root:', projectRoot);
         const entitiesPath = path.join(projectRoot, 'config', 'entities.yaml');
         if (!fs.existsSync(entitiesPath)) {
             console.warn('entities.yaml not found at', entitiesPath);
@@ -5159,6 +5217,15 @@ class WebviewMessageHandler {
         return null;
     }
     /**
+     * Gets the path to the variant_attributes.yaml file (same config dir as entities).
+     */
+    getVariantAttributesFilePath() {
+        const entitiesPath = this.getEntitiesFilePath();
+        if (!entitiesPath)
+            return null;
+        return path.join(path.dirname(entitiesPath), 'variant_attributes.yaml');
+    }
+    /**
      * Sets the current flow graph data
      */
     setFlowGraphData(data) {
@@ -5187,11 +5254,17 @@ class WebviewMessageHandler {
             case 'saveEntities':
                 await this.handleSaveEntities(message.entities);
                 break;
+            case 'saveVariantAttributes':
+                await this.handleSaveVariantAttributes(message.attributes);
+                break;
             case 'createStep':
                 await this.handleCreateStep(message.stepName, message.stepType, message.forCondition);
                 break;
             case 'deleteStep':
                 await this.handleDeleteStep(message.nodeId, message.filePath);
+                break;
+            case 'setStartStep':
+                await this.handleSetStartStep(message.nodeId);
                 break;
             case 'showError':
                 vscode.window.showErrorMessage(message.message);
@@ -5337,7 +5410,7 @@ class WebviewMessageHandler {
             });
             fs.writeFileSync(entitiesFilePath, yamlContent, 'utf8');
             // Show success message
-            vscode.window.showInformationMessage(`Entities saved successfully (${entities.length} entities)`);
+            vscode.window.showInformationMessage('Entity saved');
             // Reload the flow to update entities in the graph
             const parser = new flowParser_1.FlowParser(this.flowDir);
             const updatedFlowGraph = await parser.parseFlow();
@@ -5363,6 +5436,73 @@ class WebviewMessageHandler {
                 success: false,
                 error: errorMessage
             });
+        }
+    }
+    async handleSaveVariantAttributes(attributes) {
+        try {
+            const filePath = this.getVariantAttributesFilePath();
+            if (!filePath) {
+                vscode.window.showErrorMessage('Could not find variant_attributes.yaml file location');
+                return;
+            }
+            const configDir = path.dirname(filePath);
+            if (!fs.existsSync(configDir)) {
+                fs.mkdirSync(configDir, { recursive: true });
+            }
+            const data = { attributes };
+            const yamlContent = yaml.dump(data, {
+                indent: 2,
+                lineWidth: 100,
+                noRefs: true,
+                quotingType: '"',
+                forceQuotes: false
+            });
+            fs.writeFileSync(filePath, yamlContent, 'utf8');
+            vscode.window.showInformationMessage('Variant attribute saved');
+            const parser = new flowParser_1.FlowParser(this.flowDir);
+            const updatedFlowGraph = await parser.parseFlow();
+            this.flowGraphData = updatedFlowGraph;
+            this.panel.webview.postMessage({ command: 'loadFlow', flowGraph: updatedFlowGraph });
+            this.panel.webview.postMessage({ command: 'variantAttributesSaved', success: true });
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`Error saving variant attributes: ${errorMessage}`);
+            console.error('Error saving variant attributes:', error);
+            this.panel.webview.postMessage({ command: 'variantAttributesSaved', success: false, error: errorMessage });
+        }
+    }
+    async handleSetStartStep(nodeId) {
+        try {
+            const configPath = path.join(this.flowDir, 'flow_config.yaml');
+            if (!fs.existsSync(configPath)) {
+                vscode.window.showErrorMessage('flow_config.yaml not found');
+                return;
+            }
+            const content = fs.readFileSync(configPath, 'utf8');
+            const config = yaml.load(content);
+            if (!config || typeof config !== 'object') {
+                vscode.window.showErrorMessage('Invalid flow_config.yaml');
+                return;
+            }
+            config.start_step = nodeId;
+            const yamlContent = yaml.dump(config, {
+                indent: 2,
+                lineWidth: 100,
+                noRefs: true,
+                quotingType: '"',
+                forceQuotes: false
+            });
+            fs.writeFileSync(configPath, yamlContent, 'utf8');
+            vscode.window.showInformationMessage('Start step updated');
+            const parser = new flowParser_1.FlowParser(this.flowDir);
+            const updatedFlowGraph = await parser.parseFlow();
+            this.flowGraphData = updatedFlowGraph;
+            this.panel.webview.postMessage({ command: 'loadFlow', flowGraph: updatedFlowGraph });
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`Error updating start step: ${errorMessage}`);
         }
     }
     async handleCreateStep(stepName, stepType, forCondition) {

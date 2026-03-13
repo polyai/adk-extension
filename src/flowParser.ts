@@ -84,6 +84,12 @@ export interface Entity {
 	};
 }
 
+/** Single attribute from variant_attributes.yaml: name + values (variant_name -> value). */
+export interface VariantAttributeDefinition {
+	name: string;
+	values: Record<string, unknown>;
+}
+
 export interface FlowGraph {
 	nodes: FlowNode[];
 	edges: FlowEdge[];
@@ -91,6 +97,12 @@ export interface FlowGraph {
 	flowFunctions: FunctionReference[];
 	globalFunctions: FunctionReference[];
 	entities: Entity[];
+	/** Attribute names from config/variant_attributes.yaml for {{attr:name}} */
+	variantAttributes: string[];
+	/** Full attribute definitions for the attributes panel (edit name + values). */
+	variantAttributeDefinitions: VariantAttributeDefinition[];
+	/** Variable names discovered from conv.state.* in codebase for {{vrbl:name}} */
+	variables: string[];
 }
 
 interface FunctionInfo {
@@ -121,6 +133,9 @@ export class FlowParser {
 		const flowFunctions = await this.parseFlowFunctions();
 		const globalFunctions = await this.parseGlobalFunctions();
 		const entities = await this.parseEntities();
+		const variantAttributeDefinitions = await this.parseVariantAttributeDefinitions();
+		const variantAttributes = variantAttributeDefinitions.map((a) => a.name);
+		const variables = await this.discoverVariables();
 
 		console.log(`Parsing flow: ${config.name}`);
 		console.log(`Found ${steps.size} steps:`, Array.from(steps.keys()));
@@ -128,20 +143,15 @@ export class FlowParser {
 		console.log(`Found ${flowFunctions.size} flow functions:`, Array.from(flowFunctions.keys()));
 		console.log(`Found ${globalFunctions.size} global functions:`, Array.from(globalFunctions.keys()));
 		console.log(`Found ${entities.length} entities:`, entities.map(e => e.name));
+		console.log(`Found ${variantAttributes.length} variant attributes:`, variantAttributes);
+		console.log(`Variant attribute definitions:`, variantAttributeDefinitions.length);
+		console.log(`Found ${variables.length} variables:`, variables);
 
 		const nodes: FlowNode[] = [];
 		const edges: FlowEdge[] = [];
 		const nodeMap = new Map<string, FlowNode>();
 
-		// Add start node
-		const startNode: FlowNode = {
-			id: 'start',
-			label: 'Start',
-			type: 'end',
-			details: `Flow: ${config.name}\n${config.description || ''}\n\nStart Step: ${config.start_step || 'N/A'}`
-		};
-		nodes.push(startNode);
-		nodeMap.set('start', startNode);
+		// No separate start node; start step is indicated by config.start_step (green circle in viewer)
 
 		// Add exit node (steps that call conv.exit_flow() transition here)
 		const exitNode: FlowNode = {
@@ -188,15 +198,6 @@ export class FlowParser {
 
 		// Don't create function nodes - functions will be shown as clickable links in step details
 		// Store function info for step details and transitions
-
-		// Add edge from start to first step
-		if (config.start_step && nodeMap.has(config.start_step)) {
-			edges.push({
-				from: 'start',
-				to: config.start_step,
-				label: 'start'
-			});
-		}
 
 		// Parse transitions from step prompts
 		// Functions are not shown as nodes, but we create edges directly to target steps if functions have goto_step
@@ -349,8 +350,93 @@ export class FlowParser {
 				type: 'global-function',
 				filePath: this.getGlobalFunctionPath(name)
 			})),
-			entities
+			entities,
+			variantAttributes,
+			variantAttributeDefinitions,
+			variables
 		};
+	}
+
+	/** Get project root (directory containing config/). */
+	private getProjectRoot(): string | null {
+		let currentDir = this.flowDir;
+		while (currentDir !== path.dirname(currentDir)) {
+			const parentDir = path.dirname(currentDir);
+			const dirName = path.basename(currentDir);
+			if (dirName === 'flows' || path.basename(parentDir) === 'flows') {
+				currentDir = parentDir;
+				continue;
+			}
+			const configDir = path.join(currentDir, 'config');
+			if (fs.existsSync(configDir)) {
+				return currentDir;
+			}
+			currentDir = parentDir;
+		}
+		return null;
+	}
+
+	/**
+	 * Parse config/variant_attributes.yaml and return full definitions for the attributes panel.
+	 * Format: attributes: [ { name: attribute_name, values: { variant_name: value, ... } }, ... ]
+	 */
+	private async parseVariantAttributeDefinitions(): Promise<VariantAttributeDefinition[]> {
+		const projectRoot = this.getProjectRoot();
+		if (!projectRoot) return [];
+		const attrPath = path.join(projectRoot, 'config', 'variant_attributes.yaml');
+		if (!fs.existsSync(attrPath)) {
+			console.warn('variant_attributes.yaml not found at', attrPath);
+			return [];
+		}
+		try {
+			const content = fs.readFileSync(attrPath, 'utf8');
+			const parsed = yaml.load(content) as any;
+			if (!parsed || typeof parsed !== 'object') return [];
+			const attrs = parsed.attributes;
+			if (attrs === undefined || attrs === null || !Array.isArray(attrs)) return [];
+			return attrs
+				.filter((v: any) => v && typeof v === 'object' && typeof v.name === 'string')
+				.map((v: any) => ({
+					name: String(v.name).trim(),
+					values: v.values && typeof v.values === 'object' ? { ...v.values } : {}
+				}))
+				.filter((a: VariantAttributeDefinition) => a.name.length > 0);
+		} catch (error) {
+			console.error('Error parsing variant_attributes.yaml:', error);
+		}
+		return [];
+	}
+
+	/** Search codebase for conv.state.<variable_name> and return unique variable names for {{vrbl:name}}. */
+	private async discoverVariables(): Promise<string[]> {
+		const projectRoot = this.getProjectRoot();
+		if (!projectRoot) return [];
+		const convStateRe = /conv\.state\.([a-zA-Z_][a-zA-Z0-9_]*)/g;
+		const seen = new Set<string>();
+		const searchDir = (dir: string) => {
+			if (!fs.existsSync(dir)) return;
+			const entries = fs.readdirSync(dir, { withFileTypes: true });
+			for (const e of entries) {
+				const full = path.join(dir, e.name);
+				if (e.isDirectory()) {
+					if (e.name !== 'node_modules' && e.name !== '.git' && e.name !== '__pycache__') {
+						searchDir(full);
+					}
+				} else if (e.isFile() && (e.name.endsWith('.py') || e.name.endsWith('.yaml') || e.name.endsWith('.yml'))) {
+					try {
+						const content = fs.readFileSync(full, 'utf8');
+						let m: RegExpExecArray | null;
+						while ((m = convStateRe.exec(content)) !== null) {
+							seen.add(m[1]);
+						}
+					} catch {
+						// ignore read errors
+					}
+				}
+			}
+		};
+		searchDir(projectRoot);
+		return Array.from(seen).sort();
 	}
 
 	private async parseConfig(): Promise<FlowConfig> {
@@ -479,40 +565,11 @@ export class FlowParser {
 	}
 
 	private async parseEntities(): Promise<Entity[]> {
-		// Find project root to locate config/entities.yaml
-		// Project root is the parent of the 'flows' directory
-		let currentDir = this.flowDir;
-		let projectRoot: string | null = null;
-		
-		// Go up the directory tree to find the project root (parent of flows directory)
-		while (currentDir !== path.dirname(currentDir)) {
-			const parentDir = path.dirname(currentDir);
-			const dirName = path.basename(currentDir);
-			
-			// If we're in a flow directory inside 'flows', the project root is the parent of 'flows'
-			if (dirName === 'flows' || path.basename(parentDir) === 'flows') {
-				// Keep going up to find project root
-				currentDir = parentDir;
-				continue;
-			}
-			
-			// Check if this directory has a config folder
-			const configDir = path.join(currentDir, 'config');
-			if (fs.existsSync(configDir)) {
-				projectRoot = currentDir;
-				break;
-			}
-			
-			currentDir = parentDir;
-		}
-		
+		const projectRoot = this.getProjectRoot();
 		if (!projectRoot) {
 			console.warn('Could not find project root with config directory');
 			return [];
 		}
-		
-		console.log('Found project root:', projectRoot);
-		
 		const entitiesPath = path.join(projectRoot, 'config', 'entities.yaml');
 		if (!fs.existsSync(entitiesPath)) {
 			console.warn('entities.yaml not found at', entitiesPath);
