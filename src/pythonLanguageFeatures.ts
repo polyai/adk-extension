@@ -3,6 +3,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { PythonFunctionResolver } from './pythonFunctionResolver';
 import { debugLog } from './utils/debug';
+import { conversationMembers, flowMembers, RuntimeMember } from './generated/runtimeDescriptions';
+
+/** Shared regex for matching flow.goto_step("...") calls. Also used in flowParser.ts and pythonRules.ts. */
+export const GOTO_STEP_PATTERN = /flow\.goto_step\(\s*["']([^"']+)["']/g;
 
 /**
  * Helper function to extract function call pattern from a line at a given position
@@ -91,35 +95,221 @@ function extractFunctionCall(
 }
 
 /**
- * Definition provider for conv.functions and flow.functions
+ * Extract a conv.attribute or flow.attribute reference at the cursor position.
+ * Returns null if the cursor is on conv.functions.X (handled by extractFunctionCall).
+ */
+function extractRuntimeAttribute(
+	document: vscode.TextDocument,
+	position: vscode.Position
+): { object: 'conv' | 'flow'; attribute: string; range: vscode.Range } | null {
+	const lineText = document.lineAt(position).text;
+	const offset = position.character;
+
+	// Quick check
+	if (!lineText.includes('conv.') && !lineText.includes('flow.')) {
+		return null;
+	}
+
+	// Match conv.xxx or flow.xxx — but skip conv.functions.X / flow.functions.X
+	const pattern = /\b(conv|flow)\.(\w+)/g;
+	let match;
+	while ((match = pattern.exec(lineText)) !== null) {
+		const obj = match[1] as 'conv' | 'flow';
+		const attr = match[2];
+
+		// Skip the "functions" accessor — that's handled by extractFunctionCall
+		if (attr === 'functions') continue;
+
+		// Check the attribute is in our known members
+		const members = obj === 'conv' ? conversationMembers : flowMembers;
+		if (!members[attr]) continue;
+
+		const attrStart = match.index + obj.length + 1; // after "conv." or "flow."
+		const attrEnd = attrStart + attr.length;
+
+		if (offset >= attrStart && offset <= attrEnd) {
+			return {
+				object: obj,
+				attribute: attr,
+				range: new vscode.Range(
+					new vscode.Position(position.line, attrStart),
+					new vscode.Position(position.line, attrEnd),
+				),
+			};
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Extract a flow.goto_step("Step Name") reference, with cursor on the step name string.
+ * Returns the step name and range of the string literal.
+ */
+function extractGotoStep(
+	document: vscode.TextDocument,
+	position: vscode.Position
+): { stepName: string; range: vscode.Range } | null {
+	const lineText = document.lineAt(position).text;
+	const offset = position.character;
+
+	GOTO_STEP_PATTERN.lastIndex = 0;
+	let match;
+	while ((match = GOTO_STEP_PATTERN.exec(lineText)) !== null) {
+		const stepName = match[1];
+		// Find the position of the step name string (inside the quotes)
+		const nameIdx = match[0].indexOf(stepName);
+		const nameStart = match.index + nameIdx;
+		const nameEnd = nameStart + stepName.length;
+
+		if (offset >= nameStart && offset <= nameEnd) {
+			return {
+				stepName,
+				range: new vscode.Range(
+					new vscode.Position(position.line, nameStart),
+					new vscode.Position(position.line, nameEnd),
+				),
+			};
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Resolve a step name to the YAML file that defines it.
+ * Walks up from the current file to find the flow directory, then scans steps/*.yaml.
+ */
+function resolveStepFile(
+	stepName: string,
+	document: vscode.TextDocument
+): vscode.Location | null {
+	// Find the flow directory (contains flow_config.yaml)
+	const flowDir = PythonFunctionResolver.findFlowDirectory(document.uri.fsPath);
+	if (!flowDir) {
+		debugLog('resolveStepFile: no flow directory found');
+		return null;
+	}
+
+	const stepsDir = path.join(flowDir, 'steps');
+	if (!fs.existsSync(stepsDir)) {
+		debugLog('resolveStepFile: no steps/ directory in', flowDir);
+		return null;
+	}
+
+	// Also check function_steps/
+	const functionStepsDir = path.join(flowDir, 'function_steps');
+
+	// Scan steps/*.yaml for matching name: field
+	const yamlFiles = fs.readdirSync(stepsDir).filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+	for (const file of yamlFiles) {
+		const filePath = path.join(stepsDir, file);
+		try {
+			const content = fs.readFileSync(filePath, 'utf8');
+			const nameMatch = content.match(/^name:\s*["']?(.+?)["']?\s*$/m);
+			if (nameMatch && nameMatch[1] === stepName) {
+				return new vscode.Location(vscode.Uri.file(filePath), new vscode.Position(0, 0));
+			}
+		} catch {
+			// skip unreadable files
+		}
+	}
+
+	// Check function_steps/*.py (step name matches filename without .py)
+	if (fs.existsSync(functionStepsDir)) {
+		const pyFiles = fs.readdirSync(functionStepsDir).filter(f => f.endsWith('.py'));
+		for (const file of pyFiles) {
+			if (path.basename(file, '.py') === stepName) {
+				const filePath = path.join(functionStepsDir, file);
+				return new vscode.Location(vscode.Uri.file(filePath), new vscode.Position(0, 0));
+			}
+		}
+	}
+
+	debugLog(`resolveStepFile: step "${stepName}" not found in ${stepsDir}`);
+	return null;
+}
+
+/**
+ * Build a markdown hover tooltip from a RuntimeMember.
+ */
+function buildRuntimeHover(obj: 'conv' | 'flow', member: RuntimeMember): vscode.MarkdownString {
+	const className = obj === 'conv' ? 'Conversation' : 'Flow';
+	const kindLabel = member.kind === 'property' ? 'property' : 'method';
+
+	const md = new vscode.MarkdownString();
+	md.appendMarkdown(`**${className} ${kindLabel}**: \`${member.name}\``);
+
+	if (member.signature) {
+		md.appendCodeblock(`${obj}.${member.name}${member.signature}`, 'python');
+	} else if (member.returnType) {
+		md.appendCodeblock(`${obj}.${member.name}: ${member.returnType}`, 'python');
+	}
+
+	if (member.description) {
+		md.appendMarkdown(`\n\n${member.description}`);
+	}
+
+	if (member.parameters && member.parameters.length > 0) {
+		md.appendMarkdown(`\n\n**Parameters:**`);
+		for (const p of member.parameters) {
+			const typeStr = p.type ? `: ${p.type}` : '';
+			const descStr = p.description ? ` — ${p.description}` : '';
+			md.appendMarkdown(`\n- \`${p.name}${typeStr}\`${descStr}`);
+		}
+	}
+
+	return md;
+}
+
+/**
+ * Definition provider for conv.functions, flow.functions, and flow.goto_step
  */
 export class PythonDefinitionProvider implements vscode.DefinitionProvider {
 	provideDefinition(
 		document: vscode.TextDocument,
 		position: vscode.Position,
-		token: vscode.CancellationToken
+		_token: vscode.CancellationToken
 	): vscode.ProviderResult<vscode.Definition | vscode.LocationLink[]> {
+		const lineText = document.lineAt(position).text;
+
 		// Ultra-quick check: if line doesn't contain our patterns, return undefined immediately
 		// This allows VS Code to skip our provider and use others
-		const line = document.lineAt(position);
-		if (!line.text.includes('conv.functions') && !line.text.includes('flow.functions')) {
+		if (!lineText.includes('conv.') && !lineText.includes('flow.')) {
 			return undefined; // Return undefined to let other providers handle it
 		}
 
 		// Only process if we have our specific patterns
+		// 1. conv.functions.X / flow.functions.X → navigate to function file
 		const functionCall = extractFunctionCall(document, position);
-		
-		if (!functionCall) {
-			return undefined; // Let other providers handle it
+		if (functionCall) {
+			if (functionCall.type === 'conv') {
+				return PythonFunctionResolver.resolveConvFunction(functionCall.functionName, document);
+			} else if (functionCall.type === 'flow') {
+				return PythonFunctionResolver.resolveFlowFunction(functionCall.functionName, document);
+			}
 		}
 
-		if (functionCall.type === 'conv') {
-			return PythonFunctionResolver.resolveConvFunction(functionCall.functionName, document);
-		} else if (functionCall.type === 'flow') {
-			return PythonFunctionResolver.resolveFlowFunction(functionCall.functionName, document);
+		// 2. flow.goto_step("Step Name") → navigate to step YAML file
+		// Uses LocationLink with originSelectionRange so the entire step name
+		// (including spaces) is treated as one continuous clickable link.
+		if (lineText.includes('goto_step')) {
+			const gotoStep = extractGotoStep(document, position);
+			if (gotoStep) {
+				const target = resolveStepFile(gotoStep.stepName, document);
+				if (target) {
+					const link: vscode.LocationLink = {
+						originSelectionRange: gotoStep.range,
+						targetUri: target.uri,
+						targetRange: target.range,
+						targetSelectionRange: target.range,
+					};
+					return [link];
+				}
+			}
 		}
 
-		return undefined;
+		return undefined; // Let other providers handle it
 	}
 }
 
@@ -130,64 +320,140 @@ export class PythonHoverProvider implements vscode.HoverProvider {
 	provideHover(
 		document: vscode.TextDocument,
 		position: vscode.Position,
-		token: vscode.CancellationToken
+		_token: vscode.CancellationToken
 	): vscode.ProviderResult<vscode.Hover> {
+		const lineText = document.lineAt(position).text;
+
 		// Ultra-quick check: if line doesn't contain our patterns, return undefined immediately
-		const line = document.lineAt(position);
-		if (!line.text.includes('conv.functions') && !line.text.includes('flow.functions')) {
+		if (!lineText.includes('conv.') && !lineText.includes('flow.')) {
 			return undefined; // Return undefined to let other providers handle it
 		}
 
+		// 1. conv.functions.X / flow.functions.X → show function description from file
 		const functionCall = extractFunctionCall(document, position);
-		
-		if (!functionCall) {
-			return undefined;
-		}
+		if (functionCall) {
+			let functionPath: string | null = null;
+			let functionType: string = '';
 
-		let functionPath: string | null = null;
-		let functionType: string = '';
-
-		if (functionCall.type === 'conv') {
-			const location = PythonFunctionResolver.resolveConvFunction(functionCall.functionName, document);
-			if (location) {
-				functionPath = location.uri.fsPath;
-				functionType = 'Global function';
-			}
-		} else if (functionCall.type === 'flow') {
-			const location = PythonFunctionResolver.resolveFlowFunction(functionCall.functionName, document);
-			if (location) {
-				functionPath = location.uri.fsPath;
-				functionType = 'Flow function';
-			}
-		}
-
-		if (functionPath) {
-			const description = PythonFunctionResolver.getFunctionDescription(functionPath);
-			const parameters = PythonFunctionResolver.getFunctionParameters(functionPath);
-			const hoverText = new vscode.MarkdownString();
-			hoverText.appendMarkdown(`**${functionType}**: \`${functionCall.functionName}\``);
-			
-			if (description) {
-				hoverText.appendMarkdown(`\n\n${description}`);
-			}
-			
-			if (parameters.length > 0) {
-				hoverText.appendMarkdown(`\n\n**Parameters:**`);
-				for (const param of parameters) {
-					if (param.description) {
-						hoverText.appendMarkdown(`\n- \`${param.name}\`: ${param.description}`);
-					} else {
-						hoverText.appendMarkdown(`\n- \`${param.name}\``);
-					}
+			if (functionCall.type === 'conv') {
+				const location = PythonFunctionResolver.resolveConvFunction(functionCall.functionName, document);
+				if (location) {
+					functionPath = location.uri.fsPath;
+					functionType = 'Global function';
+				}
+			} else if (functionCall.type === 'flow') {
+				const location = PythonFunctionResolver.resolveFlowFunction(functionCall.functionName, document);
+				if (location) {
+					functionPath = location.uri.fsPath;
+					functionType = 'Flow function';
 				}
 			}
-			
-			hoverText.appendMarkdown(`\n\n*${functionPath}*`);
-			
-			return new vscode.Hover(hoverText, functionCall.range);
+
+			if (functionPath) {
+				const description = PythonFunctionResolver.getFunctionDescription(functionPath);
+				const parameters = PythonFunctionResolver.getFunctionParameters(functionPath);
+				const hoverText = new vscode.MarkdownString();
+				hoverText.appendMarkdown(`**${functionType}**: \`${functionCall.functionName}\``);
+
+				if (description) {
+					hoverText.appendMarkdown(`\n\n${description}`);
+				}
+
+				if (parameters.length > 0) {
+					hoverText.appendMarkdown(`\n\n**Parameters:**`);
+					for (const param of parameters) {
+						if (param.description) {
+							hoverText.appendMarkdown(`\n- \`${param.name}\`: ${param.description}`);
+						} else {
+							hoverText.appendMarkdown(`\n- \`${param.name}\``);
+						}
+					}
+				}
+
+				hoverText.appendMarkdown(`\n\n*${functionPath}*`);
+
+				return new vscode.Hover(hoverText, functionCall.range);
+			}
+		}
+
+		// 2. conv.attribute / flow.attribute → show runtime description
+		const runtimeAttr = extractRuntimeAttribute(document, position);
+		if (runtimeAttr) {
+			const members = runtimeAttr.object === 'conv' ? conversationMembers : flowMembers;
+			const member = members[runtimeAttr.attribute];
+			if (member) {
+				return new vscode.Hover(buildRuntimeHover(runtimeAttr.object, member), runtimeAttr.range);
+			}
 		}
 
 		return undefined;
+	}
+}
+
+/**
+ * Completion provider for conv. and flow. attributes.
+ * Triggered when the user types "." after conv or flow, showing all available
+ * members with descriptions, types, and snippet placeholders for method parameters.
+ */
+export class PythonCompletionProvider implements vscode.CompletionItemProvider {
+	provideCompletionItems(
+		document: vscode.TextDocument,
+		position: vscode.Position,
+		_token: vscode.CancellationToken,
+		_context: vscode.CompletionContext
+	): vscode.ProviderResult<vscode.CompletionItem[]> {
+		const lineText = document.lineAt(position).text;
+		const textBeforeCursor = lineText.substring(0, position.character);
+
+		// Check if the user just typed "conv." or "flow."
+		const triggerMatch = textBeforeCursor.match(/\b(conv|flow)\.\w*$/);
+		if (!triggerMatch) {
+			return undefined;
+		}
+
+		const obj = triggerMatch[1] as 'conv' | 'flow';
+		const members = obj === 'conv' ? conversationMembers : flowMembers;
+
+		return Object.values(members).map(member => {
+			const item = new vscode.CompletionItem(
+				member.name,
+				member.kind === 'method'
+					? vscode.CompletionItemKind.Method
+					: vscode.CompletionItemKind.Property,
+			);
+
+			// Detail line shown next to the suggestion (signature or type)
+			if (member.signature) {
+				item.detail = `${member.name}${member.signature}`;
+			} else if (member.returnType) {
+				item.detail = `${member.name}: ${member.returnType}`;
+			}
+
+			// Documentation shown in the side panel
+			const doc = new vscode.MarkdownString();
+			if (member.description) {
+				doc.appendMarkdown(member.description);
+			}
+			if (member.parameters && member.parameters.length > 0) {
+				doc.appendMarkdown(`\n\n**Parameters:**`);
+				for (const p of member.parameters) {
+					const typeStr = p.type ? `: ${p.type}` : '';
+					const descStr = p.description ? ` — ${p.description}` : '';
+					doc.appendMarkdown(`\n- \`${p.name}${typeStr}\`${descStr}`);
+				}
+			}
+			item.documentation = doc;
+
+			// For methods, insert a snippet with parameter placeholders
+			if (member.kind === 'method' && member.parameters && member.parameters.length > 0) {
+				const placeholders = member.parameters.map((p, i) =>
+					`\${${i + 1}:${p.name}}`
+				).join(', ');
+				item.insertText = new vscode.SnippetString(`${member.name}(${placeholders})`);
+			}
+
+			return item;
+		});
 	}
 }
 

@@ -8,7 +8,7 @@ import * as yaml from 'js-yaml';
 import { FlowParser } from './flowParser';
 import { getWebviewContent, getErrorWebviewContent } from './webview/webviewContent';
 import { WebviewMessageHandler } from './webview/webviewHandlers';
-import { PythonDefinitionProvider, PythonHoverProvider, PythonReferencesProvider } from './pythonLanguageFeatures';
+import { PythonDefinitionProvider, PythonHoverProvider, PythonReferencesProvider, PythonCompletionProvider } from './pythonLanguageFeatures';
 import { initializeDebug, toggleDebugMode, debugLog } from './utils/debug';
 import { AgentStudioLinter } from './linter';
 
@@ -241,6 +241,13 @@ conditions: []
 		{ language: 'python', scheme: 'file' },
 		new PythonReferencesProvider()
 	);
+
+	// Completion provider for conv. and flow. attributes, triggered on "."
+	const pythonCompletionProvider = vscode.languages.registerCompletionItemProvider(
+		{ language: 'python', scheme: 'file' },
+		new PythonCompletionProvider(),
+		'.'
+	);
 	debugLog('Python language features registered');
 
 	// Initialize and activate the Agent Studio Linter
@@ -255,7 +262,8 @@ conditions: []
 		toggleDebugDisposable,
 		pythonDefinitionProvider,
 		pythonHoverProvider,
-		pythonReferencesProvider
+		pythonReferencesProvider,
+		pythonCompletionProvider
 	);
 }
 
