@@ -9,7 +9,7 @@
 A Visual Studio Code extension for [Agent Development Kit](https://github.com/polyai/adk-extension) projects. Visualize ADK flow directories as interactive graphs, edit flow steps, functions, and transitions with an intuitive visual interface.
 
 ## Prerequisites
-
+test
 You must have access to a workspace in PolyAI Agent Studio before using this extension. Access is provided by your PolyAI contact. To request access to the PolyAI platform, reach out to [platform-support@poly-ai.com](mailto:platform-support@poly-ai.com).
 
 ## Installation
