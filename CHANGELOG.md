@@ -1,3 +1,9 @@
+## [1.2.0](https://github.com/polyai/adk-extension/compare/v1.1.0...v1.2.0) (2026-03-23)
+
+### Features
+
+* add conv/flow hover descriptions, goto_step navigation, and autocomplete ([#16](https://github.com/polyai/adk-extension/issues/16)) ([afb2693](https://github.com/polyai/adk-extension/commit/afb26934b6f248a669c52f8a0ffbc631dc245e58))
+
 ## [1.1.0](https://github.com/polyai/adk-extension/compare/v1.0.1...v1.1.0) (2026-03-13)
 
 ### Features
