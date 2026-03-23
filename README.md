@@ -83,8 +83,11 @@ cursor --install-extension adk-extension-*.vsix
 ### Python Language Features
 
 - **Go to Definition** - Click on `conv.functions.functionName` or `flow.functions.functionName` to jump to the function definition
+- **Go to Step** - Cmd+Click on step names in `flow.goto_step("Step Name")` to navigate directly to the step YAML file
 - **Find All References** - Find all places where a function is called across your workspace
 - **Hover Information** - See function descriptions, parameters, and file paths in tooltips
+- **Runtime Descriptions** - Hover over `conv.*` and `flow.*` attributes (e.g. `conv.say`, `conv.state`, `flow.goto_step`) to see descriptions, signatures, and parameter info from the runtime
+- **Autocomplete** - Type `conv.` or `flow.` to get autocomplete suggestions for all available attributes and methods with descriptions and parameter snippets
 
 ### ADK Linter
 
