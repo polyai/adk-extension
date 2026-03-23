@@ -1,7 +1,7 @@
 name: PR Title Check
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, edited, reopened, synchronize]
 
 jobs:
@@ -46,27 +46,18 @@ jobs:
             echo "valid=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Generate GitHub App token
-        id: generate-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.APPLICATION_ID }}
-          private-key: ${{ secrets.APPLICATION_PRIVATE_KEY }}
-
       - name: Find existing comment
         uses: peter-evans/find-comment@v3
         id: find-comment
         with:
-          token: ${{ steps.generate-token.outputs.token }}
           issue-number: ${{ github.event.pull_request.number }}
-          comment-author: '${{ steps.generate-token.outputs.app-slug }}[bot]'
+          comment-author: 'github-actions[bot]'
           body-includes: '<!-- pr-title-check -->'
 
       - name: Comment on valid PR title (will release)
         if: steps.check.outputs.valid == 'true' && steps.check.outputs.release_type != 'none'
         uses: peter-evans/create-or-update-comment@v4
         with:
-          token: ${{ steps.generate-token.outputs.token }}
           comment-id: ${{ steps.find-comment.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}
           body: |
@@ -86,7 +77,6 @@ jobs:
         if: steps.check.outputs.valid == 'true' && steps.check.outputs.release_type == 'none'
         uses: peter-evans/create-or-update-comment@v4
         with:
-          token: ${{ steps.generate-token.outputs.token }}
           comment-id: ${{ steps.find-comment.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}
           body: |
@@ -106,7 +96,6 @@ jobs:
         if: steps.check.outputs.valid == 'false'
         uses: peter-evans/create-or-update-comment@v4
         with:
-          token: ${{ steps.generate-token.outputs.token }}
           comment-id: ${{ steps.find-comment.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}
           body: |
