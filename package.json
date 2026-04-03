@@ -2,7 +2,7 @@
   "name": "adk-extension",
   "displayName": "Agent Development Kit Extension",
   "description": "Extension for the Agent Development Kit. Contains useful commands and tools for agent development.",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "PolyAI",
   "license": "Apache-2.0",
   "icon": "icon.png",

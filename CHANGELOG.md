@@ -1,3 +1,9 @@
+## [1.2.1](https://github.com/polyai/adk-extension/compare/v1.2.0...v1.2.1) (2026-04-03)
+
+### Bug Fixes
+
+* add OVSX_PAT to release workflow ([#21](https://github.com/polyai/adk-extension/issues/21)) ([5711ba9](https://github.com/polyai/adk-extension/commit/5711ba935f4acacf9886d00814d20c9b6795ad2b))
+
 ## [1.2.0](https://github.com/polyai/adk-extension/compare/v1.1.0...v1.2.0) (2026-03-23)
 
 ### Features
