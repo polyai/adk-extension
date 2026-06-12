@@ -8,7 +8,7 @@ import * as yaml from 'js-yaml';
 import { FlowParser } from './flowParser';
 import { getWebviewContent, getErrorWebviewContent } from './webview/webviewContent';
 import { WebviewMessageHandler } from './webview/webviewHandlers';
-import { PythonDefinitionProvider, PythonHoverProvider, PythonReferencesProvider, PythonCompletionProvider } from './pythonLanguageFeatures';
+import { PythonDefinitionProvider, PythonHoverProvider, PythonReferencesProvider, PythonCompletionProvider, PythonFunctionLinkProvider } from './pythonLanguageFeatures';
 import { initializeDebug, toggleDebugMode, debugLog } from './utils/debug';
 import { AgentStudioLinter } from './linter';
 
@@ -248,6 +248,13 @@ conditions: []
 		new PythonCompletionProvider(),
 		'.'
 	);
+
+	// DocumentLink provider for direct flow.X / conv.X calls — takes priority
+	// over definition providers on Ctrl+Click, bypassing Pylance's __getattr__
+	const pythonFunctionLinkProvider = vscode.languages.registerDocumentLinkProvider(
+		{ language: 'python', scheme: 'file' },
+		new PythonFunctionLinkProvider()
+	);
 	debugLog('Python language features registered');
 
 	// Initialize and activate the Agent Studio Linter
@@ -263,7 +270,8 @@ conditions: []
 		pythonDefinitionProvider,
 		pythonHoverProvider,
 		pythonReferencesProvider,
-		pythonCompletionProvider
+		pythonCompletionProvider,
+		pythonFunctionLinkProvider
 	);
 }
 

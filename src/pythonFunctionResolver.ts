@@ -117,33 +117,24 @@ export class PythonFunctionResolver {
 	}
 
 	/**
-	 * Resolves flow.functions.function_name() to the flow function file path
-	 * Flow functions are located at: project_root/functions/flow_name/function_name.py
-	 * The flow is determined by finding which flow the current file belongs to
+	 * Resolves flow.functions.function_name() to the flow function file path.
+	 * Flow functions are located at: flows/flow_name/functions/function_name.py
+	 * The flow is determined by finding the flow_config.yaml ancestor of the current file.
 	 */
 	static resolveFlowFunction(functionName: string, document: vscode.TextDocument): vscode.Location | null {
 		debugLog('Resolving flow function:', functionName, 'for file:', document.uri.fsPath);
-		
-		const projectRoot = this.findProjectRoot(document.uri.fsPath);
-		debugLog('Project root found:', projectRoot);
-		
-		if (!projectRoot) {
-			debugLog('No project root found');
+
+		const flowDir = this.findFlowDirectory(document.uri.fsPath);
+		debugLog('Flow directory found:', flowDir);
+
+		if (!flowDir) {
+			debugLog('No flow directory found');
 			return null;
 		}
 
-		const flowName = this.getFlowName(document.uri.fsPath);
-		debugLog('Flow name:', flowName);
-		
-		if (!flowName) {
-			debugLog('No flow name found');
-			return null;
-		}
-
-		// Flow functions are in project_root/functions/flow_name/function_name.py
-		const functionPath = path.join(projectRoot, 'functions', flowName, `${functionName}.py`);
+		const functionPath = path.join(flowDir, 'functions', `${functionName}.py`);
 		debugLog('Looking for flow function at:', functionPath, 'exists:', fs.existsSync(functionPath));
-		
+
 		if (fs.existsSync(functionPath)) {
 			return new vscode.Location(
 				vscode.Uri.file(functionPath),
@@ -176,21 +167,15 @@ export class PythonFunctionResolver {
 
 	/**
 	 * Gets all available flow function names for the current file's flow
-	 * Flow functions are located at: project_root/functions/flow_name/
+	 * Flow functions are located at: flows/flow_name/functions/
 	 */
 	static getFlowFunctionNames(document: vscode.TextDocument): string[] {
-		const projectRoot = this.findProjectRoot(document.uri.fsPath);
-		if (!projectRoot) {
+		const flowDir = this.findFlowDirectory(document.uri.fsPath);
+		if (!flowDir) {
 			return [];
 		}
 
-		const flowName = this.getFlowName(document.uri.fsPath);
-		if (!flowName) {
-			return [];
-		}
-
-		// Flow functions are in project_root/functions/flow_name/
-		const functionsDir = path.join(projectRoot, 'functions', flowName);
+		const functionsDir = path.join(flowDir, 'functions');
 		if (!fs.existsSync(functionsDir)) {
 			return [];
 		}
