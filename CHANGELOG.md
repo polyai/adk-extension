@@ -1,3 +1,9 @@
+## [1.2.2](https://github.com/polyai/adk-extension/compare/v1.2.1...v1.2.2) (2026-06-12)
+
+### Bug Fixes
+
+* make flow.functions.X clickable by fixing path resolution and bypassing __getattr__ ([#22](https://github.com/polyai/adk-extension/issues/22)) ([0c14c53](https://github.com/polyai/adk-extension/commit/0c14c5320b3e9d0580b43f1d5b25eda0add9f4d9))
+
 ## [1.2.1](https://github.com/polyai/adk-extension/compare/v1.2.0...v1.2.1) (2026-04-03)
 
 ### Bug Fixes
