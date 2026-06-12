@@ -650,3 +650,54 @@ export class PythonReferencesProvider implements vscode.ReferenceProvider {
 	}
 }
 
+/**
+ * Document link provider for direct flow.X / conv.X function calls.
+ * DocumentLinks take priority over definition providers on Ctrl+Click,
+ * so this bypasses Pylance's __getattr__ result and navigates directly
+ * to the function file.
+ */
+export class PythonFunctionLinkProvider implements vscode.DocumentLinkProvider {
+	provideDocumentLinks(
+		document: vscode.TextDocument,
+		_token: vscode.CancellationToken
+	): vscode.ProviderResult<vscode.DocumentLink[]> {
+		const links: vscode.DocumentLink[] = [];
+		const lineCount = document.lineCount;
+
+		const patterns = [
+			{ regex: /\bconv\.(\w+)/g, type: 'conv' as const, members: conversationMembers },
+			{ regex: /\bflow\.(\w+)/g, type: 'flow' as const, members: flowMembers }
+		];
+
+		for (let i = 0; i < lineCount; i++) {
+			const line = document.lineAt(i).text;
+			if (!line.includes('conv.') && !line.includes('flow.')) continue;
+
+			for (const pattern of patterns) {
+				let match;
+				pattern.regex.lastIndex = 0;
+				while ((match = pattern.regex.exec(line)) !== null) {
+					const attr = match[1];
+					if (attr === 'functions' || pattern.members[attr]) continue;
+
+					const location = pattern.type === 'conv'
+						? PythonFunctionResolver.resolveConvFunction(attr, document)
+						: PythonFunctionResolver.resolveFlowFunction(attr, document);
+
+					if (location) {
+						const dotIndex = match[0].indexOf('.');
+						const attrStart = match.index + dotIndex + 1;
+						const range = new vscode.Range(
+							new vscode.Position(i, attrStart),
+							new vscode.Position(i, attrStart + attr.length)
+						);
+						links.push(new vscode.DocumentLink(range, location.uri));
+					}
+				}
+			}
+		}
+
+		return links;
+	}
+}
+
