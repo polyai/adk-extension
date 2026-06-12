@@ -464,7 +464,7 @@ export class PythonCompletionProvider implements vscode.CompletionItemProvider {
 function getFunctionInfoFromFile(filePath: string): { functionName: string; type: 'conv' | 'flow' } | null {
 	const fileName = path.basename(filePath, '.py');
 	const dirName = path.dirname(filePath);
-	
+
 	// Check if this is a global function (in project_root/functions/function_name.py)
 	const projectRoot = PythonFunctionResolver.findProjectRoot(filePath);
 	if (projectRoot) {
@@ -472,16 +472,16 @@ function getFunctionInfoFromFile(filePath: string): { functionName: string; type
 		if (dirName === globalFunctionsDir) {
 			return { functionName: fileName, type: 'conv' };
 		}
-		
-		// Check if this is a flow function (in project_root/functions/flow_name/function_name.py)
-		const relativePath = path.relative(globalFunctionsDir, dirName);
-		const parts = relativePath.split(path.sep);
-		if (parts.length === 1 && parts[0] && parts[0] !== '.') {
-			// We're in functions/flow_name/, so this is a flow function
+	}
+
+	// Check if this is a flow function (in flows/flow_name/functions/function_name.py)
+	if (path.basename(dirName) === 'functions') {
+		const flowDir = path.dirname(dirName);
+		if (fs.existsSync(path.join(flowDir, 'flow_config.yaml'))) {
 			return { functionName: fileName, type: 'flow' };
 		}
 	}
-	
+
 	return null;
 }
 
