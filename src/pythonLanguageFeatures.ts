@@ -9,7 +9,9 @@ import { conversationMembers, flowMembers, RuntimeMember } from './generated/run
 export const GOTO_STEP_PATTERN = /flow\.goto_step\(\s*["']([^"']+)["']/g;
 
 /**
- * Helper function to extract function call pattern from a line at a given position
+ * Helper function to extract function call pattern from a line at a given position.
+ * Matches both qualified calls (conv.functions.X / flow.functions.X) and
+ * direct calls (conv.X / flow.X) where X is not a known runtime attribute.
  * Returns { type: 'conv' | 'flow', functionName: string, range: vscode.Range } or null
  */
 function extractFunctionCall(
@@ -20,73 +22,75 @@ function extractFunctionCall(
 	const lineText = line.text;
 	const offset = position.character;
 
-	// Quick check: if the line doesn't contain "conv.functions" or "flow.functions", return immediately
-	if (!lineText.includes('conv.functions') && !lineText.includes('flow.functions')) {
+	if (!lineText.includes('conv.') && !lineText.includes('flow.')) {
 		return null;
 	}
 
-	// First, try to get the word at the cursor position
-	// This helps when user clicks directly on the function name
 	const wordRange = document.getWordRangeAtPosition(position, /\w+/);
 	let searchStart = 0;
 	let searchEnd = lineText.length;
-	
+
 	if (wordRange) {
-		// Expand search to include context around the word
-		// Look backwards up to 50 characters to find "conv.functions." or "flow.functions."
 		searchStart = Math.max(0, wordRange.start.character - 50);
 		searchEnd = Math.min(lineText.length, wordRange.end.character + 50);
 	}
-	
+
 	const searchText = lineText.substring(searchStart, searchEnd);
 
-	// Try to match conv.functions.function_name or flow.functions.function_name
-	// This regex matches the full pattern including the function name
-	const patterns = [
-		// Match conv.functions.function_name (with optional parentheses and arguments)
-		{
-			regex: /conv\.functions\.(\w+)(?:\([^)]*\))?/g,
-			type: 'conv' as const
-		},
-		// Match flow.functions.function_name (with optional parentheses and arguments)
-		{
-			regex: /flow\.functions\.(\w+)(?:\([^)]*\))?/g,
-			type: 'flow' as const
+	// Phase 1: Try qualified calls — conv.functions.X / flow.functions.X
+	if (lineText.includes('.functions.')) {
+		const qualifiedPatterns = [
+			{ regex: /conv\.functions\.(\w+)(?:\([^)]*\))?/g, type: 'conv' as const },
+			{ regex: /flow\.functions\.(\w+)(?:\([^)]*\))?/g, type: 'flow' as const }
+		];
+
+		for (const pattern of qualifiedPatterns) {
+			let match;
+			pattern.regex.lastIndex = 0;
+			while ((match = pattern.regex.exec(searchText)) !== null) {
+				const absoluteMatchStart = searchStart + match.index;
+				const absoluteMatchEnd = searchStart + match.index + match[0].length;
+
+				if (offset >= absoluteMatchStart && offset <= absoluteMatchEnd) {
+					const functionName = match[1];
+					const functionNameOffset = match[0].indexOf(functionName);
+					const functionNameStart = absoluteMatchStart + functionNameOffset;
+					const functionNameEnd = functionNameStart + functionName.length;
+
+					if (offset >= functionNameStart && offset <= functionNameEnd) {
+						const startPos = new vscode.Position(position.line, functionNameStart);
+						const endPos = new vscode.Position(position.line, functionNameEnd);
+						return { type: pattern.type, functionName, range: new vscode.Range(startPos, endPos) };
+					}
+					return null;
+				}
+			}
 		}
+	}
+
+	// Phase 2: Try direct calls — conv.X / flow.X where X is not a known runtime attribute
+	const directPatterns = [
+		{ regex: /\bconv\.(\w+)/g, type: 'conv' as const, members: conversationMembers },
+		{ regex: /\bflow\.(\w+)/g, type: 'flow' as const, members: flowMembers }
 	];
 
-	for (const pattern of patterns) {
+	for (const pattern of directPatterns) {
 		let match;
-		pattern.regex.lastIndex = 0; // Reset regex
+		pattern.regex.lastIndex = 0;
 		while ((match = pattern.regex.exec(searchText)) !== null) {
-			const matchStart = match.index;
-			const matchEnd = match.index + match[0].length;
-			
-			// The match position is relative to searchText, so we need to adjust
-			const absoluteMatchStart = searchStart + matchStart;
-			const absoluteMatchEnd = searchStart + matchEnd;
-			
-			// Check if the cursor position is within this match
-			if (offset >= absoluteMatchStart && offset <= absoluteMatchEnd) {
-				const functionName = match[1];
-				// Find where the function name starts in the match
-				const functionNameOffset = match[0].indexOf(functionName);
-				const functionNameStart = absoluteMatchStart + functionNameOffset;
-				const functionNameEnd = functionNameStart + functionName.length;
-				
-				// Only return a result if the cursor is specifically on the function name part
-				// Not on "conv", "flow", or "functions"
-				if (offset >= functionNameStart && offset <= functionNameEnd) {
-					const startPos = new vscode.Position(position.line, functionNameStart);
-					const endPos = new vscode.Position(position.line, functionNameEnd);
-					return {
-						type: pattern.type,
-						functionName,
-						range: new vscode.Range(startPos, endPos)
-					};
-				}
-				// If cursor is on "conv", "flow", or "functions", return null
-				return null;
+			const attr = match[1];
+
+			if (attr === 'functions' || pattern.members[attr]) continue;
+
+			const absoluteMatchStart = searchStart + match.index;
+			const dotIndex = match[0].indexOf('.');
+			const attrStart = absoluteMatchStart + dotIndex + 1;
+			const attrEnd = attrStart + attr.length;
+
+			if (offset >= attrStart && offset <= attrEnd) {
+				const startPos = new vscode.Position(position.line, attrStart);
+				const endPos = new vscode.Position(position.line, attrEnd);
+				return { type: pattern.type, functionName: attr, range: new vscode.Range(startPos, endPos) };
 			}
 		}
 	}
@@ -496,22 +500,18 @@ async function findFunctionReferences(
 	token: vscode.CancellationToken
 ): Promise<vscode.Location[]> {
 	const locations: vscode.Location[] = [];
-	
-	// Escape the function name for regex
+
 	const escapedFunctionName = functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	
-	// Build search pattern - match conv.functions.functionName or flow.functions.functionName
-	// with optional whitespace and parentheses
-	const pattern = type === 'conv'
-		? new RegExp(`conv\\.functions\\.${escapedFunctionName}(?:\\s*\\([^)]*\\))?`, 'g')
-		: new RegExp(`flow\\.functions\\.${escapedFunctionName}(?:\\s*\\([^)]*\\))?`, 'g');
-	
-	// Quick string check pattern (for fast filtering before regex)
-	const quickCheckPattern = type === 'conv'
-		? `conv.functions.${functionName}`
-		: `flow.functions.${functionName}`;
-	
-	debugLog(`Searching for ${type === 'conv' ? 'conv' : 'flow'}.functions.${functionName}`);
+	const prefix = type === 'conv' ? 'conv' : 'flow';
+
+	// Match both qualified (conv.functions.X) and direct (conv.X) call patterns
+	const qualifiedPattern = new RegExp(`${prefix}\\.functions\\.${escapedFunctionName}(?:\\s*\\([^)]*\\))?`, 'g');
+	const directPattern = new RegExp(`\\b${prefix}\\.${escapedFunctionName}\\b`, 'g');
+
+	const quickCheckQualified = `${prefix}.functions.${functionName}`;
+	const quickCheckDirect = `${prefix}.${functionName}`;
+
+	debugLog(`Searching for ${prefix}.functions.${functionName} and ${prefix}.${functionName}`);
 	
 	try {
 		// Get all Python files in the workspace (with limit)
@@ -545,39 +545,59 @@ async function findFunctionReferences(
 				}
 				
 				try {
-					// Read file directly (faster than opening as document)
 					const fileContent = fs.readFileSync(fileUri.fsPath, 'utf8');
-					
-					// Quick check: skip if pattern not found
-					if (!fileContent.includes(quickCheckPattern)) {
+
+					const hasQualified = fileContent.includes(quickCheckQualified);
+					const hasDirect = fileContent.includes(quickCheckDirect);
+					if (!hasQualified && !hasDirect) {
 						continue;
 					}
-					
-					// Split into lines and search
+
 					const lines = fileContent.split('\n');
 					for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
 						if (token.isCancellationRequested) {
 							break;
 						}
-						
+
 						const line = lines[lineIndex];
-						let match;
-						pattern.lastIndex = 0; // Reset regex
-						
-						while ((match = pattern.exec(line)) !== null) {
-							// Find the function name within the match
-							const functionNameOffset = match[0].indexOf(functionName);
-							if (functionNameOffset !== -1) {
-								const functionNameStart = match.index + functionNameOffset;
-								const functionNameEnd = functionNameStart + functionName.length;
-								
-								locations.push(new vscode.Location(
-									fileUri,
-									new vscode.Range(
-										new vscode.Position(lineIndex, functionNameStart),
-										new vscode.Position(lineIndex, functionNameEnd)
-									)
-								));
+						const matchedPositions = new Set<number>();
+
+						// Search qualified pattern first
+						if (hasQualified) {
+							let match;
+							qualifiedPattern.lastIndex = 0;
+							while ((match = qualifiedPattern.exec(line)) !== null) {
+								const fnOffset = match[0].indexOf(functionName);
+								if (fnOffset !== -1) {
+									const fnStart = match.index + fnOffset;
+									matchedPositions.add(fnStart);
+									locations.push(new vscode.Location(
+										fileUri,
+										new vscode.Range(
+											new vscode.Position(lineIndex, fnStart),
+											new vscode.Position(lineIndex, fnStart + functionName.length)
+										)
+									));
+								}
+							}
+						}
+
+						// Search direct pattern, skipping positions already found by qualified
+						if (hasDirect) {
+							let match;
+							directPattern.lastIndex = 0;
+							while ((match = directPattern.exec(line)) !== null) {
+								const dotIdx = match[0].indexOf('.');
+								const fnStart = match.index + dotIdx + 1;
+								if (!matchedPositions.has(fnStart)) {
+									locations.push(new vscode.Location(
+										fileUri,
+										new vscode.Range(
+											new vscode.Position(lineIndex, fnStart),
+											new vscode.Position(lineIndex, fnStart + functionName.length)
+										)
+									));
+								}
 							}
 						}
 					}
