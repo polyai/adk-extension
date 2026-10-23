@@ -92,5 +92,46 @@ suite('FunctionPathResolver', () => {
 			assert.ok(location);
 			assert.strictEqual(location!.line, 2);
 		});
+
+		test('allows a trailing comment on the attributes section header', () => {
+			const stepFile = writeProject(
+				'attributes: # project attributes\n' +
+				'  - name: site_name\n'
+			);
+
+			const location = FunctionPathResolver.resolveVariantAttributeLocation('site_name', stepFile);
+			assert.ok(location);
+			assert.strictEqual(location!.line, 1);
+		});
+
+		test('skips a full-line comment between entries without ending the search', () => {
+			const stepFile = writeProject(
+				'attributes:\n' +
+				'  - name: other_attribute\n' +
+				'# a comment at column 0, not a top-level key\n' +
+				'  - name: site_name\n'
+			);
+
+			const location = FunctionPathResolver.resolveVariantAttributeLocation('site_name', stepFile);
+			assert.ok(location);
+			assert.strictEqual(location!.line, 3);
+		});
+
+		test('does not match "name:" text nested inside another entry\'s block-scalar value', () => {
+			const stepFile = writeProject(
+				'attributes:\n' +
+				'  - name: greeting\n' +
+				'    values:\n' +
+				'      voice: |-\n' +
+				'        Some text that happens to contain\n' +
+				'        name: site_name\n' +
+				'        as literal content.\n' +
+				'  - name: site_name\n'
+			);
+
+			const location = FunctionPathResolver.resolveVariantAttributeLocation('site_name', stepFile);
+			assert.ok(location);
+			assert.strictEqual(location!.line, 7);
+		});
 	});
 });

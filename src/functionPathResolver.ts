@@ -307,7 +307,8 @@ export class FunctionPathResolver {
 		const lines = content.split('\n');
 
 		// Only search within the `attributes:` section — `variants:` has same-shaped `- name: X` entries.
-		const attributesKeyLine = lines.findIndex(line => /^attributes:\s*$/.test(line));
+		// Allow a trailing comment on the section header itself (e.g. `attributes: # project attributes`).
+		const attributesKeyLine = lines.findIndex(line => /^attributes:\s*(#.*)?$/.test(line));
 		if (attributesKeyLine === -1) {
 			return null;
 		}
@@ -318,17 +319,22 @@ export class FunctionPathResolver {
 		const escapedName = attrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 		const namePattern = new RegExp(`^(\\s*(?:-\\s*)?name:\\s*)(["']?)${escapedName}\\2\\s*(?:#.*)?$`);
 
-		// Track the attribute list's item indent (the `- ` under `attributes:`) so we stop once
-		// we dedent out of the list, rather than matching into an unrelated later section.
+		// Track the attribute list's item indent (the `- ` under `attributes:`) and each entry's
+		// key indent (the column its mapping keys start at), so we only match `name:` as a direct
+		// key of the entry's own mapping — not block-scalar body text or deeper-nested values that
+		// happen to contain the literal text "name:".
 		let itemIndent: number | null = null;
+		let entryKeyIndent: number | null = null;
 
 		for (let i = attributesKeyLine + 1; i < lines.length; i++) {
 			const line = lines[i];
-			if (line.trim() === '') {
-				continue;
+			if (line.trim() === '' || /^\s*#/.test(line)) {
+				continue; // blank lines and full-line comments don't affect list structure
 			}
 
-			const dashMatch = line.match(/^(\s*)-\s/);
+			const dashMatch = line.match(/^(\s*)-\s+/);
+			let lineKeyIndent: number;
+
 			if (dashMatch) {
 				const indent = dashMatch[1].length;
 				if (itemIndent === null) {
@@ -336,11 +342,20 @@ export class FunctionPathResolver {
 				} else if (indent < itemIndent) {
 					break; // dedented out of the attributes list
 				}
+				if (indent === itemIndent) {
+					entryKeyIndent = dashMatch[0].length; // new entry: its keys start right after "- "
+				}
+				lineKeyIndent = dashMatch[0].length;
 			} else {
 				const indent = line.match(/^(\s*)/)![1].length;
-				if (itemIndent !== null && indent === 0) {
+				if (indent === 0) {
 					break; // back to a top-level key — end of the attributes list
 				}
+				lineKeyIndent = indent;
+			}
+
+			if (entryKeyIndent === null || lineKeyIndent !== entryKeyIndent) {
+				continue; // not a direct key of the current entry's mapping
 			}
 
 			const match = namePattern.exec(line);
