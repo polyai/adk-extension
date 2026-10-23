@@ -52,8 +52,9 @@ const flowParser_1 = __webpack_require__(29);
 const webviewContent_1 = __webpack_require__(30);
 const webviewHandlers_1 = __webpack_require__(31);
 const pythonLanguageFeatures_1 = __webpack_require__(33);
-const debug_1 = __webpack_require__(35);
-const linter_1 = __webpack_require__(36);
+const yamlLanguageFeatures_1 = __webpack_require__(38);
+const debug_1 = __webpack_require__(36);
+const linter_1 = __webpack_require__(39);
 function toSnakeCase(str) {
     return str
         .replace(/([a-z])([A-Z])/g, '$1_$2')
@@ -248,13 +249,25 @@ conditions: []
     const pythonDefinitionProvider = vscode.languages.registerDefinitionProvider({ language: 'python', scheme: 'file' }, new pythonLanguageFeatures_1.PythonDefinitionProvider());
     const pythonHoverProvider = vscode.languages.registerHoverProvider({ language: 'python', scheme: 'file' }, new pythonLanguageFeatures_1.PythonHoverProvider());
     const pythonReferencesProvider = vscode.languages.registerReferenceProvider({ language: 'python', scheme: 'file' }, new pythonLanguageFeatures_1.PythonReferencesProvider());
+    // Completion provider for conv. and flow. attributes, triggered on "."
+    const pythonCompletionProvider = vscode.languages.registerCompletionItemProvider({ language: 'python', scheme: 'file' }, new pythonLanguageFeatures_1.PythonCompletionProvider(), '.');
+    // DocumentLink provider for direct flow.X / conv.X calls — takes priority
+    // over definition providers on Ctrl+Click, bypassing Pylance's __getattr__
+    const pythonFunctionLinkProvider = vscode.languages.registerDocumentLinkProvider({ language: 'python', scheme: 'file' }, new pythonLanguageFeatures_1.PythonFunctionLinkProvider());
     (0, debug_1.debugLog)('Python language features registered');
+    // Register YAML language features for {{fn:X}} / {{ft:X}} / {{attr:X}} resolution
+    (0, debug_1.debugLog)('Registering YAML language features...');
+    const yamlFunctionLinkProvider = vscode.languages.registerDocumentLinkProvider({ language: 'yaml', scheme: 'file' }, new yamlLanguageFeatures_1.YamlFunctionLinkProvider());
+    const yamlFunctionHoverProvider = vscode.languages.registerHoverProvider({ language: 'yaml', scheme: 'file' }, new yamlLanguageFeatures_1.YamlFunctionHoverProvider());
+    const yamlAttrLinkProvider = vscode.languages.registerDocumentLinkProvider({ language: 'yaml', scheme: 'file' }, new yamlLanguageFeatures_1.YamlAttrLinkProvider());
+    const yamlAttrHoverProvider = vscode.languages.registerHoverProvider({ language: 'yaml', scheme: 'file' }, new yamlLanguageFeatures_1.YamlAttrHoverProvider());
+    (0, debug_1.debugLog)('YAML language features registered');
     // Initialize and activate the Agent Studio Linter
     (0, debug_1.debugLog)('Activating Agent Studio Linter...');
     const linter = new linter_1.AgentStudioLinter();
     linter.activate(context);
     (0, debug_1.debugLog)('Agent Studio Linter activated');
-    context.subscriptions.push(viewFlowDisposable, createFlowDisposable, toggleDebugDisposable, pythonDefinitionProvider, pythonHoverProvider, pythonReferencesProvider);
+    context.subscriptions.push(viewFlowDisposable, createFlowDisposable, toggleDebugDisposable, pythonDefinitionProvider, pythonHoverProvider, pythonReferencesProvider, pythonCompletionProvider, pythonFunctionLinkProvider, yamlFunctionLinkProvider, yamlFunctionHoverProvider, yamlAttrLinkProvider, yamlAttrHoverProvider);
 }
 // This method is called when your extension is deactivated
 function deactivate() { }
@@ -5794,12 +5807,15 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.PythonReferencesProvider = exports.PythonHoverProvider = exports.PythonDefinitionProvider = void 0;
+exports.PythonFunctionLinkProvider = exports.PythonReferencesProvider = exports.PythonCompletionProvider = exports.PythonHoverProvider = exports.PythonDefinitionProvider = exports.GOTO_STEP_PATTERN = void 0;
 const vscode = __importStar(__webpack_require__(1));
 const path = __importStar(__webpack_require__(2));
 const fs = __importStar(__webpack_require__(3));
 const pythonFunctionResolver_1 = __webpack_require__(34);
-const debug_1 = __webpack_require__(35);
+const debug_1 = __webpack_require__(36);
+const runtimeDescriptions_1 = __webpack_require__(37);
+/** Shared regex for matching flow.goto_step("...") calls. Also used in flowParser.ts and pythonRules.ts. */
+exports.GOTO_STEP_PATTERN = /flow\.goto_step\(\s*["']([^"']+)["']/g;
 /**
  * Helper function to extract function call pattern from a line at a given position
  * Returns { type: 'conv' | 'flow', functionName: string, range: vscode.Range } or null
@@ -5873,28 +5889,179 @@ function extractFunctionCall(document, position) {
     return null;
 }
 /**
- * Definition provider for conv.functions and flow.functions
+ * Extract a conv.attribute or flow.attribute reference at the cursor position.
+ * Returns null if the cursor is on conv.functions.X (handled by extractFunctionCall).
+ */
+function extractRuntimeAttribute(document, position) {
+    const lineText = document.lineAt(position).text;
+    const offset = position.character;
+    // Quick check
+    if (!lineText.includes('conv.') && !lineText.includes('flow.')) {
+        return null;
+    }
+    // Match conv.xxx or flow.xxx — but skip conv.functions.X / flow.functions.X
+    const pattern = /\b(conv|flow)\.(\w+)/g;
+    let match;
+    while ((match = pattern.exec(lineText)) !== null) {
+        const obj = match[1];
+        const attr = match[2];
+        // Skip the "functions" accessor — that's handled by extractFunctionCall
+        if (attr === 'functions')
+            continue;
+        // Check the attribute is in our known members
+        const members = obj === 'conv' ? runtimeDescriptions_1.conversationMembers : runtimeDescriptions_1.flowMembers;
+        if (!members[attr])
+            continue;
+        const attrStart = match.index + obj.length + 1; // after "conv." or "flow."
+        const attrEnd = attrStart + attr.length;
+        if (offset >= attrStart && offset <= attrEnd) {
+            return {
+                object: obj,
+                attribute: attr,
+                range: new vscode.Range(new vscode.Position(position.line, attrStart), new vscode.Position(position.line, attrEnd)),
+            };
+        }
+    }
+    return null;
+}
+/**
+ * Extract a flow.goto_step("Step Name") reference, with cursor on the step name string.
+ * Returns the step name and range of the string literal.
+ */
+function extractGotoStep(document, position) {
+    const lineText = document.lineAt(position).text;
+    const offset = position.character;
+    exports.GOTO_STEP_PATTERN.lastIndex = 0;
+    let match;
+    while ((match = exports.GOTO_STEP_PATTERN.exec(lineText)) !== null) {
+        const stepName = match[1];
+        // Find the position of the step name string (inside the quotes)
+        const nameIdx = match[0].indexOf(stepName);
+        const nameStart = match.index + nameIdx;
+        const nameEnd = nameStart + stepName.length;
+        if (offset >= nameStart && offset <= nameEnd) {
+            return {
+                stepName,
+                range: new vscode.Range(new vscode.Position(position.line, nameStart), new vscode.Position(position.line, nameEnd)),
+            };
+        }
+    }
+    return null;
+}
+/**
+ * Resolve a step name to the YAML file that defines it.
+ * Walks up from the current file to find the flow directory, then scans steps/*.yaml.
+ */
+function resolveStepFile(stepName, document) {
+    // Find the flow directory (contains flow_config.yaml)
+    const flowDir = pythonFunctionResolver_1.PythonFunctionResolver.findFlowDirectory(document.uri.fsPath);
+    if (!flowDir) {
+        (0, debug_1.debugLog)('resolveStepFile: no flow directory found');
+        return null;
+    }
+    const stepsDir = path.join(flowDir, 'steps');
+    if (!fs.existsSync(stepsDir)) {
+        (0, debug_1.debugLog)('resolveStepFile: no steps/ directory in', flowDir);
+        return null;
+    }
+    // Also check function_steps/
+    const functionStepsDir = path.join(flowDir, 'function_steps');
+    // Scan steps/*.yaml for matching name: field
+    const yamlFiles = fs.readdirSync(stepsDir).filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+    for (const file of yamlFiles) {
+        const filePath = path.join(stepsDir, file);
+        try {
+            const content = fs.readFileSync(filePath, 'utf8');
+            const nameMatch = content.match(/^name:\s*["']?(.+?)["']?\s*$/m);
+            if (nameMatch && nameMatch[1] === stepName) {
+                return new vscode.Location(vscode.Uri.file(filePath), new vscode.Position(0, 0));
+            }
+        }
+        catch {
+            // skip unreadable files
+        }
+    }
+    // Check function_steps/*.py (step name matches filename without .py)
+    if (fs.existsSync(functionStepsDir)) {
+        const pyFiles = fs.readdirSync(functionStepsDir).filter(f => f.endsWith('.py'));
+        for (const file of pyFiles) {
+            if (path.basename(file, '.py') === stepName) {
+                const filePath = path.join(functionStepsDir, file);
+                return new vscode.Location(vscode.Uri.file(filePath), new vscode.Position(0, 0));
+            }
+        }
+    }
+    (0, debug_1.debugLog)(`resolveStepFile: step "${stepName}" not found in ${stepsDir}`);
+    return null;
+}
+/**
+ * Build a markdown hover tooltip from a RuntimeMember.
+ */
+function buildRuntimeHover(obj, member) {
+    const className = obj === 'conv' ? 'Conversation' : 'Flow';
+    const kindLabel = member.kind === 'property' ? 'property' : 'method';
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`**${className} ${kindLabel}**: \`${member.name}\``);
+    if (member.signature) {
+        md.appendCodeblock(`${obj}.${member.name}${member.signature}`, 'python');
+    }
+    else if (member.returnType) {
+        md.appendCodeblock(`${obj}.${member.name}: ${member.returnType}`, 'python');
+    }
+    if (member.description) {
+        md.appendMarkdown(`\n\n${member.description}`);
+    }
+    if (member.parameters && member.parameters.length > 0) {
+        md.appendMarkdown(`\n\n**Parameters:**`);
+        for (const p of member.parameters) {
+            const typeStr = p.type ? `: ${p.type}` : '';
+            const descStr = p.description ? ` — ${p.description}` : '';
+            md.appendMarkdown(`\n- \`${p.name}${typeStr}\`${descStr}`);
+        }
+    }
+    return md;
+}
+/**
+ * Definition provider for conv.functions, flow.functions, and flow.goto_step
  */
 class PythonDefinitionProvider {
-    provideDefinition(document, position, token) {
+    provideDefinition(document, position, _token) {
+        const lineText = document.lineAt(position).text;
         // Ultra-quick check: if line doesn't contain our patterns, return undefined immediately
         // This allows VS Code to skip our provider and use others
-        const line = document.lineAt(position);
-        if (!line.text.includes('conv.functions') && !line.text.includes('flow.functions')) {
+        if (!lineText.includes('conv.') && !lineText.includes('flow.')) {
             return undefined; // Return undefined to let other providers handle it
         }
         // Only process if we have our specific patterns
+        // 1. conv.functions.X / flow.functions.X → navigate to function file
         const functionCall = extractFunctionCall(document, position);
-        if (!functionCall) {
-            return undefined; // Let other providers handle it
+        if (functionCall) {
+            if (functionCall.type === 'conv') {
+                return pythonFunctionResolver_1.PythonFunctionResolver.resolveConvFunction(functionCall.functionName, document);
+            }
+            else if (functionCall.type === 'flow') {
+                return pythonFunctionResolver_1.PythonFunctionResolver.resolveFlowFunction(functionCall.functionName, document);
+            }
         }
-        if (functionCall.type === 'conv') {
-            return pythonFunctionResolver_1.PythonFunctionResolver.resolveConvFunction(functionCall.functionName, document);
+        // 2. flow.goto_step("Step Name") → navigate to step YAML file
+        // Uses LocationLink with originSelectionRange so the entire step name
+        // (including spaces) is treated as one continuous clickable link.
+        if (lineText.includes('goto_step')) {
+            const gotoStep = extractGotoStep(document, position);
+            if (gotoStep) {
+                const target = resolveStepFile(gotoStep.stepName, document);
+                if (target) {
+                    const link = {
+                        originSelectionRange: gotoStep.range,
+                        targetUri: target.uri,
+                        targetRange: target.range,
+                        targetSelectionRange: target.range,
+                    };
+                    return [link];
+                }
+            }
         }
-        else if (functionCall.type === 'flow') {
-            return pythonFunctionResolver_1.PythonFunctionResolver.resolveFlowFunction(functionCall.functionName, document);
-        }
-        return undefined;
+        return undefined; // Let other providers handle it
     }
 }
 exports.PythonDefinitionProvider = PythonDefinitionProvider;
@@ -5902,58 +6069,118 @@ exports.PythonDefinitionProvider = PythonDefinitionProvider;
  * Hover provider for conv.functions and flow.functions
  */
 class PythonHoverProvider {
-    provideHover(document, position, token) {
+    provideHover(document, position, _token) {
+        const lineText = document.lineAt(position).text;
         // Ultra-quick check: if line doesn't contain our patterns, return undefined immediately
-        const line = document.lineAt(position);
-        if (!line.text.includes('conv.functions') && !line.text.includes('flow.functions')) {
+        if (!lineText.includes('conv.') && !lineText.includes('flow.')) {
             return undefined; // Return undefined to let other providers handle it
         }
+        // 1. conv.functions.X / flow.functions.X → show function description from file
         const functionCall = extractFunctionCall(document, position);
-        if (!functionCall) {
-            return undefined;
-        }
-        let functionPath = null;
-        let functionType = '';
-        if (functionCall.type === 'conv') {
-            const location = pythonFunctionResolver_1.PythonFunctionResolver.resolveConvFunction(functionCall.functionName, document);
-            if (location) {
-                functionPath = location.uri.fsPath;
-                functionType = 'Global function';
-            }
-        }
-        else if (functionCall.type === 'flow') {
-            const location = pythonFunctionResolver_1.PythonFunctionResolver.resolveFlowFunction(functionCall.functionName, document);
-            if (location) {
-                functionPath = location.uri.fsPath;
-                functionType = 'Flow function';
-            }
-        }
-        if (functionPath) {
-            const description = pythonFunctionResolver_1.PythonFunctionResolver.getFunctionDescription(functionPath);
-            const parameters = pythonFunctionResolver_1.PythonFunctionResolver.getFunctionParameters(functionPath);
-            const hoverText = new vscode.MarkdownString();
-            hoverText.appendMarkdown(`**${functionType}**: \`${functionCall.functionName}\``);
-            if (description) {
-                hoverText.appendMarkdown(`\n\n${description}`);
-            }
-            if (parameters.length > 0) {
-                hoverText.appendMarkdown(`\n\n**Parameters:**`);
-                for (const param of parameters) {
-                    if (param.description) {
-                        hoverText.appendMarkdown(`\n- \`${param.name}\`: ${param.description}`);
-                    }
-                    else {
-                        hoverText.appendMarkdown(`\n- \`${param.name}\``);
-                    }
+        if (functionCall) {
+            let functionPath = null;
+            let functionType = '';
+            if (functionCall.type === 'conv') {
+                const location = pythonFunctionResolver_1.PythonFunctionResolver.resolveConvFunction(functionCall.functionName, document);
+                if (location) {
+                    functionPath = location.uri.fsPath;
+                    functionType = 'Global function';
                 }
             }
-            hoverText.appendMarkdown(`\n\n*${functionPath}*`);
-            return new vscode.Hover(hoverText, functionCall.range);
+            else if (functionCall.type === 'flow') {
+                const location = pythonFunctionResolver_1.PythonFunctionResolver.resolveFlowFunction(functionCall.functionName, document);
+                if (location) {
+                    functionPath = location.uri.fsPath;
+                    functionType = 'Flow function';
+                }
+            }
+            if (functionPath) {
+                const description = pythonFunctionResolver_1.PythonFunctionResolver.getFunctionDescription(functionPath);
+                const parameters = pythonFunctionResolver_1.PythonFunctionResolver.getFunctionParameters(functionPath);
+                const hoverText = new vscode.MarkdownString();
+                hoverText.appendMarkdown(`**${functionType}**: \`${functionCall.functionName}\``);
+                if (description) {
+                    hoverText.appendMarkdown(`\n\n${description}`);
+                }
+                if (parameters.length > 0) {
+                    hoverText.appendMarkdown(`\n\n**Parameters:**`);
+                    for (const param of parameters) {
+                        if (param.description) {
+                            hoverText.appendMarkdown(`\n- \`${param.name}\`: ${param.description}`);
+                        }
+                        else {
+                            hoverText.appendMarkdown(`\n- \`${param.name}\``);
+                        }
+                    }
+                }
+                hoverText.appendMarkdown(`\n\n*${functionPath}*`);
+                return new vscode.Hover(hoverText, functionCall.range);
+            }
+        }
+        // 2. conv.attribute / flow.attribute → show runtime description
+        const runtimeAttr = extractRuntimeAttribute(document, position);
+        if (runtimeAttr) {
+            const members = runtimeAttr.object === 'conv' ? runtimeDescriptions_1.conversationMembers : runtimeDescriptions_1.flowMembers;
+            const member = members[runtimeAttr.attribute];
+            if (member) {
+                return new vscode.Hover(buildRuntimeHover(runtimeAttr.object, member), runtimeAttr.range);
+            }
         }
         return undefined;
     }
 }
 exports.PythonHoverProvider = PythonHoverProvider;
+/**
+ * Completion provider for conv. and flow. attributes.
+ * Triggered when the user types "." after conv or flow, showing all available
+ * members with descriptions, types, and snippet placeholders for method parameters.
+ */
+class PythonCompletionProvider {
+    provideCompletionItems(document, position, _token, _context) {
+        const lineText = document.lineAt(position).text;
+        const textBeforeCursor = lineText.substring(0, position.character);
+        // Check if the user just typed "conv." or "flow."
+        const triggerMatch = textBeforeCursor.match(/\b(conv|flow)\.\w*$/);
+        if (!triggerMatch) {
+            return undefined;
+        }
+        const obj = triggerMatch[1];
+        const members = obj === 'conv' ? runtimeDescriptions_1.conversationMembers : runtimeDescriptions_1.flowMembers;
+        return Object.values(members).map(member => {
+            const item = new vscode.CompletionItem(member.name, member.kind === 'method'
+                ? vscode.CompletionItemKind.Method
+                : vscode.CompletionItemKind.Property);
+            // Detail line shown next to the suggestion (signature or type)
+            if (member.signature) {
+                item.detail = `${member.name}${member.signature}`;
+            }
+            else if (member.returnType) {
+                item.detail = `${member.name}: ${member.returnType}`;
+            }
+            // Documentation shown in the side panel
+            const doc = new vscode.MarkdownString();
+            if (member.description) {
+                doc.appendMarkdown(member.description);
+            }
+            if (member.parameters && member.parameters.length > 0) {
+                doc.appendMarkdown(`\n\n**Parameters:**`);
+                for (const p of member.parameters) {
+                    const typeStr = p.type ? `: ${p.type}` : '';
+                    const descStr = p.description ? ` — ${p.description}` : '';
+                    doc.appendMarkdown(`\n- \`${p.name}${typeStr}\`${descStr}`);
+                }
+            }
+            item.documentation = doc;
+            // For methods, insert a snippet with parameter placeholders
+            if (member.kind === 'method' && member.parameters && member.parameters.length > 0) {
+                const placeholders = member.parameters.map((p, i) => `\${${i + 1}:${p.name}}`).join(', ');
+                item.insertText = new vscode.SnippetString(`${member.name}(${placeholders})`);
+            }
+            return item;
+        });
+    }
+}
+exports.PythonCompletionProvider = PythonCompletionProvider;
 /**
  * Helper function to determine if a file is a function definition file
  * and extract the function name and type
@@ -5968,11 +6195,11 @@ function getFunctionInfoFromFile(filePath) {
         if (dirName === globalFunctionsDir) {
             return { functionName: fileName, type: 'conv' };
         }
-        // Check if this is a flow function (in project_root/functions/flow_name/function_name.py)
-        const relativePath = path.relative(globalFunctionsDir, dirName);
-        const parts = relativePath.split(path.sep);
-        if (parts.length === 1 && parts[0] && parts[0] !== '.') {
-            // We're in functions/flow_name/, so this is a flow function
+    }
+    // Check if this is a flow function (in flows/flow_name/functions/function_name.py)
+    if (path.basename(dirName) === 'functions') {
+        const flowDir = path.dirname(dirName);
+        if (fs.existsSync(path.join(flowDir, 'flow_config.yaml'))) {
             return { functionName: fileName, type: 'flow' };
         }
     }
@@ -6085,6 +6312,44 @@ class PythonReferencesProvider {
     }
 }
 exports.PythonReferencesProvider = PythonReferencesProvider;
+/**
+ * Document link provider for conv.functions.X / flow.functions.X calls.
+ * DocumentLinks take priority over definition providers on Ctrl+Click,
+ * so this bypasses Pylance's __getattr__ result and navigates directly
+ * to the function file.
+ */
+class PythonFunctionLinkProvider {
+    provideDocumentLinks(document, _token) {
+        const links = [];
+        const lineCount = document.lineCount;
+        const patterns = [
+            { regex: /conv\.functions\.(\w+)/g, type: 'conv' },
+            { regex: /flow\.functions\.(\w+)/g, type: 'flow' }
+        ];
+        for (let i = 0; i < lineCount; i++) {
+            const line = document.lineAt(i).text;
+            if (!line.includes('.functions.'))
+                continue;
+            for (const pattern of patterns) {
+                let match;
+                pattern.regex.lastIndex = 0;
+                while ((match = pattern.regex.exec(line)) !== null) {
+                    const functionName = match[1];
+                    const location = pattern.type === 'conv'
+                        ? pythonFunctionResolver_1.PythonFunctionResolver.resolveConvFunction(functionName, document)
+                        : pythonFunctionResolver_1.PythonFunctionResolver.resolveFlowFunction(functionName, document);
+                    if (location) {
+                        const fnStart = match.index + match[0].indexOf(functionName);
+                        const range = new vscode.Range(new vscode.Position(i, fnStart), new vscode.Position(i, fnStart + functionName.length));
+                        links.push(new vscode.DocumentLink(range, location.uri));
+                    }
+                }
+            }
+        }
+        return links;
+    }
+}
+exports.PythonFunctionLinkProvider = PythonFunctionLinkProvider;
 
 
 /***/ }),
@@ -6127,14 +6392,132 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.PythonFunctionResolver = void 0;
-const path = __importStar(__webpack_require__(2));
-const fs = __importStar(__webpack_require__(3));
 const vscode = __importStar(__webpack_require__(1));
-const debug_1 = __webpack_require__(35);
+const functionPathResolver_1 = __webpack_require__(35);
 /**
- * Resolves function paths for conv.functions and flow.functions in Python files
+ * vscode-dependent convenience wrappers around FunctionPathResolver, for use from
+ * providers that operate on an open vscode.TextDocument (go-to-definition, hover, etc).
+ * Pure path-resolution logic lives in FunctionPathResolver so it can also be used from
+ * the standalone `adk-lint` CLI, which has no `vscode` module at runtime.
  */
 class PythonFunctionResolver {
+    static findProjectRoot(filePath) {
+        return functionPathResolver_1.FunctionPathResolver.findProjectRoot(filePath);
+    }
+    static findFlowDirectory(filePath) {
+        return functionPathResolver_1.FunctionPathResolver.findFlowDirectory(filePath);
+    }
+    static getFlowName(filePath) {
+        return functionPathResolver_1.FunctionPathResolver.getFlowName(filePath);
+    }
+    static resolveConvFunctionPath(functionName, filePath) {
+        return functionPathResolver_1.FunctionPathResolver.resolveConvFunctionPath(functionName, filePath);
+    }
+    /**
+     * Resolves conv.functions.function_name() to the global function file path
+     */
+    static resolveConvFunction(functionName, document) {
+        const functionPath = this.resolveConvFunctionPath(functionName, document.uri.fsPath);
+        if (!functionPath) {
+            return null;
+        }
+        return new vscode.Location(vscode.Uri.file(functionPath), new vscode.Position(0, 0));
+    }
+    static resolveFlowFunctionPath(functionName, filePath) {
+        return functionPathResolver_1.FunctionPathResolver.resolveFlowFunctionPath(functionName, filePath);
+    }
+    /**
+     * Resolves flow.functions.function_name() to the flow function file path.
+     */
+    static resolveFlowFunction(functionName, document) {
+        const functionPath = this.resolveFlowFunctionPath(functionName, document.uri.fsPath);
+        if (!functionPath) {
+            return null;
+        }
+        return new vscode.Location(vscode.Uri.file(functionPath), new vscode.Position(0, 0));
+    }
+    /**
+     * Gets all available global function names
+     */
+    static getGlobalFunctionNames(document) {
+        return functionPathResolver_1.FunctionPathResolver.getGlobalFunctionNames(document.uri.fsPath);
+    }
+    /**
+     * Gets all available flow function names for the current file's flow
+     */
+    static getFlowFunctionNames(document) {
+        return functionPathResolver_1.FunctionPathResolver.getFlowFunctionNames(document.uri.fsPath);
+    }
+    static getFunctionDescription(filePath) {
+        return functionPathResolver_1.FunctionPathResolver.getFunctionDescription(filePath);
+    }
+    static getFunctionParameters(filePath) {
+        return functionPathResolver_1.FunctionPathResolver.getFunctionParameters(filePath);
+    }
+    static findVariantAttributesPath(filePath) {
+        return functionPathResolver_1.FunctionPathResolver.findVariantAttributesPath(filePath);
+    }
+    static findVariantAttributeNames(filePath) {
+        return functionPathResolver_1.FunctionPathResolver.findVariantAttributeNames(filePath);
+    }
+    static resolveVariantAttributeLocation(attrName, filePath) {
+        return functionPathResolver_1.FunctionPathResolver.resolveVariantAttributeLocation(attrName, filePath);
+    }
+}
+exports.PythonFunctionResolver = PythonFunctionResolver;
+
+
+/***/ }),
+/* 35 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.FunctionPathResolver = void 0;
+const path = __importStar(__webpack_require__(2));
+const fs = __importStar(__webpack_require__(3));
+// @ts-ignore - js-yaml types may not be available
+const yaml = __importStar(__webpack_require__(4));
+/**
+ * Pure filesystem-based resolution for Agent Studio projects: locating functions,
+ * flows, and variant attributes on disk. No `vscode` dependency, so this module is safe
+ * to use from both the extension (via pythonFunctionResolver.ts) and the standalone
+ * `adk-lint` CLI (src/cli.ts), which has no `vscode` module available at runtime.
+ */
+class FunctionPathResolver {
     /**
      * Finds the project root (directory containing a functions folder that's not inside flows)
      */
@@ -6205,55 +6588,34 @@ class PythonFunctionResolver {
         return null;
     }
     /**
-     * Resolves conv.functions.function_name() to the global function file path
+     * Resolves conv.functions.function_name() to the global function file path.
      */
-    static resolveConvFunction(functionName, document) {
-        (0, debug_1.debugLog)('Resolving conv function:', functionName, 'for file:', document.uri.fsPath);
-        const projectRoot = this.findProjectRoot(document.uri.fsPath);
-        (0, debug_1.debugLog)('Project root found:', projectRoot);
+    static resolveConvFunctionPath(functionName, filePath) {
+        const projectRoot = this.findProjectRoot(filePath);
         if (!projectRoot) {
-            (0, debug_1.debugLog)('No project root found');
             return null;
         }
         const functionPath = path.join(projectRoot, 'functions', `${functionName}.py`);
-        (0, debug_1.debugLog)('Looking for function at:', functionPath, 'exists:', fs.existsSync(functionPath));
-        if (fs.existsSync(functionPath)) {
-            return new vscode.Location(vscode.Uri.file(functionPath), new vscode.Position(0, 0));
-        }
-        return null;
+        return fs.existsSync(functionPath) ? functionPath : null;
     }
     /**
-     * Resolves flow.functions.function_name() to the flow function file path
-     * Flow functions are located at: project_root/functions/flow_name/function_name.py
-     * The flow is determined by finding which flow the current file belongs to
+     * Resolves flow.functions.function_name() to the flow function file path.
+     * Flow functions are located at: flows/flow_name/functions/function_name.py
+     * The flow is determined by finding the flow_config.yaml ancestor of the current file.
      */
-    static resolveFlowFunction(functionName, document) {
-        (0, debug_1.debugLog)('Resolving flow function:', functionName, 'for file:', document.uri.fsPath);
-        const projectRoot = this.findProjectRoot(document.uri.fsPath);
-        (0, debug_1.debugLog)('Project root found:', projectRoot);
-        if (!projectRoot) {
-            (0, debug_1.debugLog)('No project root found');
+    static resolveFlowFunctionPath(functionName, filePath) {
+        const flowDir = this.findFlowDirectory(filePath);
+        if (!flowDir) {
             return null;
         }
-        const flowName = this.getFlowName(document.uri.fsPath);
-        (0, debug_1.debugLog)('Flow name:', flowName);
-        if (!flowName) {
-            (0, debug_1.debugLog)('No flow name found');
-            return null;
-        }
-        // Flow functions are in project_root/functions/flow_name/function_name.py
-        const functionPath = path.join(projectRoot, 'functions', flowName, `${functionName}.py`);
-        (0, debug_1.debugLog)('Looking for flow function at:', functionPath, 'exists:', fs.existsSync(functionPath));
-        if (fs.existsSync(functionPath)) {
-            return new vscode.Location(vscode.Uri.file(functionPath), new vscode.Position(0, 0));
-        }
-        return null;
+        const functionPath = path.join(flowDir, 'functions', `${functionName}.py`);
+        return fs.existsSync(functionPath) ? functionPath : null;
     }
     /**
      * Gets all available global function names
      */
-    static getGlobalFunctionNames(document) {
-        const projectRoot = this.findProjectRoot(document.uri.fsPath);
+    static getGlobalFunctionNames(filePath) {
+        const projectRoot = this.findProjectRoot(filePath);
         if (!projectRoot) {
             return [];
         }
@@ -6268,19 +6630,14 @@ class PythonFunctionResolver {
     }
     /**
      * Gets all available flow function names for the current file's flow
-     * Flow functions are located at: project_root/functions/flow_name/
+     * Flow functions are located at: flows/flow_name/functions/
      */
-    static getFlowFunctionNames(document) {
-        const projectRoot = this.findProjectRoot(document.uri.fsPath);
-        if (!projectRoot) {
+    static getFlowFunctionNames(filePath) {
+        const flowDir = this.findFlowDirectory(filePath);
+        if (!flowDir) {
             return [];
         }
-        const flowName = this.getFlowName(document.uri.fsPath);
-        if (!flowName) {
-            return [];
-        }
-        // Flow functions are in project_root/functions/flow_name/
-        const functionsDir = path.join(projectRoot, 'functions', flowName);
+        const functionsDir = path.join(flowDir, 'functions');
         if (!fs.existsSync(functionsDir)) {
             return [];
         }
@@ -6346,7 +6703,6 @@ class PythonFunctionResolver {
                     }
                 }
                 if (paramName) {
-                    (0, debug_1.debugLog)('Found parameter:', paramName, 'description:', paramDescription);
                     parameters.push({
                         name: paramName,
                         description: paramDescription
@@ -6359,12 +6715,73 @@ class PythonFunctionResolver {
         }
         return parameters;
     }
+    /**
+     * Finds the project's config/variant_attributes.yaml, which defines {{attr:X}} targets.
+     */
+    static findVariantAttributesPath(filePath) {
+        const projectRoot = this.findProjectRoot(filePath);
+        if (!projectRoot) {
+            return null;
+        }
+        const attrPath = path.join(projectRoot, 'config', 'variant_attributes.yaml');
+        return fs.existsSync(attrPath) ? attrPath : null;
+    }
+    /**
+     * Finds all distinct attribute names defined under `attributes:` in config/variant_attributes.yaml.
+     * Used to validate {{attr:X}} references in YAML files.
+     */
+    static findVariantAttributeNames(filePath) {
+        const names = new Set();
+        const attrPath = this.findVariantAttributesPath(filePath);
+        if (!attrPath) {
+            return names;
+        }
+        try {
+            const config = yaml.load(fs.readFileSync(attrPath, 'utf8'));
+            for (const attribute of config?.attributes ?? []) {
+                if (typeof attribute?.name === 'string') {
+                    names.add(attribute.name);
+                }
+            }
+        }
+        catch {
+            // Skip unparsable variant_attributes.yaml
+        }
+        return names;
+    }
+    /**
+     * Finds the `- name: attrName` entry under `attributes:` in config/variant_attributes.yaml, for navigation.
+     * Returns the file path and 0-based line/character of the start of the attribute name.
+     */
+    static resolveVariantAttributeLocation(attrName, filePath) {
+        const attrPath = this.findVariantAttributesPath(filePath);
+        if (!attrPath) {
+            return null;
+        }
+        if (!this.findVariantAttributeNames(filePath).has(attrName)) {
+            return null;
+        }
+        const content = fs.readFileSync(attrPath, 'utf8');
+        const lines = content.split('\n');
+        // Only search within the `attributes:` section — `variants:` has same-shaped `- name: X` entries.
+        const attributesKeyLine = lines.findIndex(line => /^attributes:\s*$/.test(line));
+        const searchStart = attributesKeyLine === -1 ? 0 : attributesKeyLine;
+        const escapedName = attrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const namePattern = new RegExp(`^(\\s*-\\s*name:\\s*["']?)${escapedName}["']?\\s*$`);
+        for (let i = searchStart; i < lines.length; i++) {
+            const match = namePattern.exec(lines[i]);
+            if (match) {
+                return { filePath: attrPath, line: i, character: match[1].length };
+            }
+        }
+        return null;
+    }
 }
-exports.PythonFunctionResolver = PythonFunctionResolver;
+exports.FunctionPathResolver = FunctionPathResolver;
 
 
 /***/ }),
-/* 35 */
+/* 36 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -6454,7 +6871,1017 @@ function debugError(...args) {
 
 
 /***/ }),
-/* 36 */
+/* 37 */
+/***/ ((__unused_webpack_module, exports) => {
+
+
+// AUTO-GENERATED by scripts/generate-runtime-descriptions.js
+// Source: github: PolyAI-LDN/genai_lambda_runtime
+// Do not edit manually — re-run the script to regenerate.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.flowMembers = exports.flowClassDescription = exports.conversationMembers = exports.conversationClassDescription = void 0;
+exports.conversationClassDescription = `Object exposing useful information from the conversation runtime`;
+exports.conversationMembers = {
+    "utils": {
+        name: "utils",
+        kind: "property",
+        description: `intialise utils class`,
+    },
+    "memory": {
+        name: "memory",
+        kind: "property",
+        description: `Expose memory interface to builders.`,
+    },
+    "log": {
+        name: "log",
+        kind: "property",
+        description: `Initialize logging utility`,
+    },
+    "agentic_dial": {
+        name: "agentic_dial",
+        kind: "property",
+        description: `Agentic dial`,
+    },
+    "id": {
+        name: "id",
+        kind: "property",
+        description: `The ID of the conversation`,
+        returnType: `str`,
+    },
+    "account_id": {
+        name: "account_id",
+        kind: "property",
+        description: `The account ID`,
+        returnType: `str`,
+    },
+    "project_id": {
+        name: "project_id",
+        kind: "property",
+        description: `The project ID`,
+        returnType: `str`,
+    },
+    "env": {
+        name: "env",
+        kind: "property",
+        description: `The client environment this is executing in`,
+        returnType: `str`,
+    },
+    "sip_headers": {
+        name: "sip_headers",
+        kind: "property",
+        description: `Dict mapping header names to values`,
+        returnType: `dict[str, str]`,
+    },
+    "integration_attributes": {
+        name: "integration_attributes",
+        kind: "property",
+        description: `Attributes provided by an external integration.`,
+        fullDescription: `Attributes provided by an external integration.
+
+These attributes are defined per project and per integration
+and are typically agreed upon during the project setup phase.
+
+Supported integrations include:
+- [DNIs Pooling](https://docs.poly.ai/integrations/voice/dnis-pool)
+
+Example: A \`shared_id\` might be provided by the client, allowing them to
+correlate conversation outcomes using the same id via the Handoff API.
+This \`shared_id\` should be saved into the state to achieve that:
+\`\`\`python
+if not (shared_id := conv.integration_attributes.get("shared_id")):
+# configure default handoff info
+conv.state.shared_id = shared_id
+\`\`\`
+
+It's recommended to validate and extract any required attributes at the start
+of the conversation within the \`start_function\` to handle missing data appropriately.`,
+        returnType: `dict[str, Any] | None`,
+    },
+    "caller_number": {
+        name: "caller_number",
+        kind: "property",
+        description: `The caller's phone number`,
+        returnType: `str | None`,
+    },
+    "callee_number": {
+        name: "callee_number",
+        kind: "property",
+        description: `The callee's phone number`,
+        returnType: `str | None`,
+    },
+    "state": {
+        name: "state",
+        kind: "property",
+        description: `Dictionary of saved variables that persist through the conversation`,
+        fullDescription: `Dictionary of saved variables that persist through the conversation
+
+Supports dict-style indexing e.g. \`conv.state["key"] = "value"\``,
+        returnType: `State`,
+    },
+    "entities": {
+        name: "entities",
+        kind: "property",
+        description: `The entities collected from the conversation`,
+        returnType: `Entities`,
+    },
+    "current_flow": {
+        name: "current_flow",
+        kind: "property",
+        description: `Name of the flow we are currently in`,
+        returnType: `str | None`,
+    },
+    "current_step": {
+        name: "current_step",
+        kind: "property",
+        description: `Name of the step we are currently in`,
+        returnType: `str | None`,
+    },
+    "sms_queue": {
+        name: "sms_queue",
+        kind: "property",
+        description: `Queue of SMS messages to send`,
+        returnType: `list[OutgoingSMS | OutgoingSMSTemplate]`,
+    },
+    "metrics_queue": {
+        name: "metrics_queue",
+        kind: "property",
+        description: `Queue of metrics to write`,
+        returnType: `list[dict]`,
+    },
+    "variant_name": {
+        name: "variant_name",
+        kind: "property",
+        description: `The name of the variant of the conversation`,
+        returnType: `str | None`,
+    },
+    "variants": {
+        name: "variants",
+        kind: "property",
+        description: `The variants of the conversation with their attributes`,
+        returnType: `dict[str, Variant]`,
+    },
+    "variant": {
+        name: "variant",
+        kind: "property",
+        description: `The variant of the conversation`,
+        returnType: `Variant | None`,
+    },
+    "sms_templates": {
+        name: "sms_templates",
+        kind: "property",
+        description: `The SMS templates available to the conversation`,
+        returnType: `dict[str, SMSTemplate]`,
+    },
+    "voice_change": {
+        name: "voice_change",
+        kind: "property",
+        description: `The request to change voice for the conversation`,
+        returnType: `TTSVoice | None`,
+    },
+    "language": {
+        name: "language",
+        kind: "property",
+        description: `The ISO 639 language code of the language set for the conversation`,
+        returnType: `str | None`,
+    },
+    "history": {
+        name: "history",
+        kind: "property",
+        description: `The history of the conversation so far`,
+        returnType: `list[UserInput | AgentResponse]`,
+    },
+    "handoffs": {
+        name: "handoffs",
+        kind: "property",
+        description: `The handoffs available to the conversation`,
+        returnType: `dict[str, HandoffConfig]`,
+    },
+    "transcript_alternatives": {
+        name: "transcript_alternatives",
+        kind: "property",
+        description: `List of transcription alternatives for the last user input, including the primary transcription.`,
+        fullDescription: `List of transcription alternatives for the last user input,
+including the primary transcription.`,
+        returnType: `list[str]`,
+    },
+    "real_time_config": {
+        name: "real_time_config",
+        kind: "property",
+        description: `The real time config for the conversation`,
+        fullDescription: `The real time config for the conversation
+
+Warning: Every key that you may use might be None, so please check for None before using.`,
+        returnType: `dict[str, Any | None]`,
+    },
+    "functions": {
+        name: "functions",
+        kind: "property",
+        description: `The functions available to the conversation`,
+        returnType: `FunctionExecutor`,
+    },
+    "api": {
+        name: "api",
+        kind: "property",
+        description: `Access to API integrations via conv.api.{api_name}.{operation}()`,
+        fullDescription: `Access to API integrations via conv.api.{api_name}.{operation}()
+
+Example usage:
+response = conv.api.salesforce.get_contact(user_id="123")
+if response.status_code == 200:
+contact_data = response.json()
+conv.say(f"Found contact: {contact_data['name']}")
+
+response = conv.api.stripe.create_payment(amount=100)
+if response.ok:
+payment_data = response.json()
+conv.say(f"Payment created: {payment_data['id']}")`,
+        returnType: `ApiExecutor`,
+    },
+    "generic_external_events": {
+        name: "generic_external_events",
+        kind: "property",
+        description: `The generic external events available to the conversation initiated by the function generate_external_event. This is a queue, so the latest item is the newest event. Each item is an object containing the following parameters:`,
+        fullDescription: `The generic external events available to the conversation initiated by the
+function generate_external_event. This is a queue, so the latest item is the
+newest event. Each item is an object containing the following parameters:
+
+- ext_event_id: <str> the event id;
+- send_to_llm: <bool> whether the payload of the webhook will eventually be
+also fed to the LLM as system prompt;
+- created_at: <str / datetime isoformat> when the event id was registered in
+the system (it is None if the event has not been registered yet);
+- data: <str> the raw string form of the webhook payload (it is None if the
+webhook has not been called yet passing the related event id);
+- content_type: <str> the content type of the webhook payload (it is None if
+the webhook has not been called yet passing the related event id).`,
+        returnType: `list[dict]`,
+    },
+    "channel_type": {
+        name: "channel_type",
+        kind: "property",
+        description: `The channel of the conversation e.g. 'sms', 'sip.polyai'`,
+        returnType: `str`,
+    },
+    "attachments": {
+        name: "attachments",
+        kind: "property",
+        description: `List of attachments to be included with the next agent message.`,
+        fullDescription: `List of attachments to be included with the next agent message.
+
+Each attachment provides additional context or information for the user.
+Attachments are only supported on WEBCHAT channels.`,
+        returnType: `list[Attachment]`,
+    },
+    "response_suggestions": {
+        name: "response_suggestions",
+        kind: "property",
+        description: `List of response suggestions (text strings) for the next agent message.`,
+        fullDescription: `List of response suggestions (text strings) for the next agent message.
+
+These are quick replies or suggested messages for the user. In supported channels (such as webchat), they appear as clickable options. If the user clicks a suggestion, that text will be sent as their response.
+
+Only supported on WEBCHAT channels.`,
+        returnType: `list[str]`,
+    },
+    "webchat": {
+        name: "webchat",
+        kind: "property",
+        description: `Webchat-specific interface.`,
+        fullDescription: `Webchat-specific interface.
+
+Use this to access functionality only supported on WEBCHAT channels,
+e.g. \`\`conv.webchat.set_chat_call_actions(...)\`\`.`,
+        returnType: `WebchatInterface`,
+    },
+    "translations": {
+        name: "translations",
+        kind: "property",
+        description: `Return the localized translation of the accessed field name.`,
+        fullDescription: `Return the localized translation of the accessed field name.
+
+When an attribute is accessed on this object, its name is used as a key
+to look up the corresponding translation in the internal \`translations\`
+dictionary for the current language. If no translation is found, the
+original attribute name is returned unchanged.`,
+        returnType: `TranslationReplacementProxy`,
+    },
+    "provider_voice_id": {
+        name: "provider_voice_id",
+        kind: "property",
+        description: `The TTS provider voice ID set for the conversation`,
+        returnType: `str`,
+    },
+    "integrations": {
+        name: "integrations",
+        kind: "property",
+        description: `Access to external integrations via conv.integrations.{integration_name}()`,
+        fullDescription: `Access to external integrations via conv.integrations.{integration_name}()
+
+Example usage:
+response = conv.integrations.salesforce.get_contact(user_id="123")
+if response.status_code == 200:
+contact_data = response.json()
+conv.say(f"Found contact: {contact_data['name']}")
+
+response = conv.integrations.stripe.create_payment(amount=100)
+if response.ok:
+payment_data = response.json()
+conv.say(f"Payment created: {payment_data['id']}")`,
+        returnType: `Integrations`,
+    },
+    "send_email": {
+        name: "send_email",
+        kind: "method",
+        signature: `(to: str, body: str, subject: str = "") -> None`,
+        description: `Send an email`,
+        fullDescription: `Send an email
+
+Args:
+to (str): To email address
+body (str): Raw body of the email
+subject (str, optional): Subject of the email. Defaults to "".`,
+        returnType: `None`,
+        parameters: [
+            { name: "to", type: `str`, description: `To email address` },
+            { name: "body", type: `str`, description: `Raw body of the email` },
+            { name: "subject", type: `str`, description: `Subject of the email. Defaults to "".`, default: "\"\"" },
+        ],
+    },
+    "set_voice": {
+        name: "set_voice",
+        kind: "method",
+        signature: `(voice: VoiceType)`,
+        description: `Change the voice for the current conversation moving forward.`,
+        fullDescription: `Change the voice for the current conversation moving forward.
+
+Args:
+voice: The voice to be used.`,
+        parameters: [
+            { name: "voice", type: `VoiceType`, description: `The voice to be used.` },
+        ],
+    },
+    "set_language": {
+        name: "set_language",
+        kind: "method",
+        signature: `(language: SupportedLanguageCodes)`,
+        description: `Change the language for the current conversation moving forward.`,
+        fullDescription: `Change the language for the current conversation moving forward.
+
+Args:
+language: The ISO 639 language code of the language to switch to.`,
+        parameters: [
+            { name: "language", type: `SupportedLanguageCodes`, description: `The ISO 639 language code of the language to switch to.` },
+        ],
+    },
+    "set_asr_biasing": {
+        name: "set_asr_biasing",
+        kind: "method",
+        signature: `(keywords: list[str] | None = None, custom_biases: dict[str, float] | None = None) -> None`,
+        description: `Set ASR biasing for the conversation.`,
+        fullDescription: `Set ASR biasing for the conversation.
+
+This method allows functions to dynamically configure ASR keywords and
+custom biases. The biasing persists across turns until explicitly cleared
+using \`clear_asr_biasing()\` or updated with a new call to this method.
+
+Args:
+keywords: List of keywords to bias ASR recognition toward.
+Keywords are equally biased.
+Example: ["hotel", "restaurant", "booking"]
+custom_biases: Dictionary mapping phrases to bias weights.
+Custom biases allow you to specify unequal biases for different phrases.
+Example: {"booking": 3.0, "cancellation": 2.5}
+
+Raises:
+ValueError: If keywords contains non-string values or custom_biases
+has invalid types.`,
+        returnType: `None`,
+        parameters: [
+            { name: "keywords", type: `list[str] | None`, description: `List of keywords to bias ASR recognition toward. Keywords are equally biased.`, default: "None" },
+            { name: "custom_biases", type: `dict[str, float] | None`, default: "None" },
+        ],
+    },
+    "clear_asr_biasing": {
+        name: "clear_asr_biasing",
+        kind: "method",
+        signature: `() -> None`,
+        description: `Clear ASR biasing for future turns.`,
+        fullDescription: `Clear ASR biasing for future turns.
+
+This method clears any previously set ASR biasing by calling
+set_asr_biasing() with empty values.`,
+        returnType: `None`,
+    },
+    "say": {
+        name: "say",
+        kind: "method",
+        signature: `(utterance: str)`,
+        description: `Set the next utterance to be said following the execution of the function`,
+        parameters: [
+            { name: "utterance", type: `str` },
+        ],
+    },
+    "randomize_voice": {
+        name: "randomize_voice",
+        kind: "method",
+        signature: `(voice_weights: list[VoiceWeighting])`,
+        description: `Randomly selects a voice from a weighted list of voices.`,
+        fullDescription: `Randomly selects a voice from a weighted list of voices.
+
+Args:
+voices: A list of VoiceWeighting objects containing voices and their
+weights.
+
+Raises:
+ValueError: If no voices are provided or if weight assignments are invalid.`,
+        parameters: [
+            { name: "voice_weights", type: `list[VoiceWeighting]` },
+        ],
+    },
+    "goto_flow": {
+        name: "goto_flow",
+        kind: "method",
+        signature: `(flow_name: str)`,
+        description: `Trigger a transition to a flow`,
+        fullDescription: `Trigger a transition to a flow
+
+Args:
+flow_name: the name of the flow to enter`,
+        parameters: [
+            { name: "flow_name", type: `str`, description: `the name of the flow to enter` },
+        ],
+    },
+    "exit_flow": {
+        name: "exit_flow",
+        kind: "method",
+        signature: `()`,
+        description: `Trigger exiting the current flow`,
+    },
+    "goto_csat_flow": {
+        name: "goto_csat_flow",
+        kind: "method",
+        signature: `()`,
+        description: `Trigger a transition to the CSAT survey flow for voice.`,
+        fullDescription: `Trigger a transition to the CSAT survey flow for voice.
+
+Additional channels (e.g. SMS) may be supported in the future.`,
+    },
+    "set_variant": {
+        name: "set_variant",
+        kind: "method",
+        signature: `(variant: str)`,
+        description: `Set the variant of the conversation`,
+        fullDescription: `Set the variant of the conversation
+
+Args:
+variant: the variant to set`,
+        parameters: [
+            { name: "variant", type: `str`, description: `the variant to set` },
+        ],
+    },
+    "log_api_response": {
+        name: "log_api_response",
+        kind: "method",
+        signature: `(response: requests.models.Response, override_url: str = None)`,
+        description: `Log api response for analytics`,
+        fullDescription: `Log api response for analytics
+
+Args:
+response: api response
+override_url: allow user to define the url schema they want to group by`,
+        parameters: [
+            { name: "response", type: `requests.models.Response`, description: `api response` },
+            { name: "override_url", type: `str`, description: `allow user to define the url schema they want to group by`, default: "None" },
+        ],
+    },
+    "send_sms": {
+        name: "send_sms",
+        kind: "method",
+        signature: `(to_number: str, from_number: str, content: str, retry_count: int | None = None) -> dict | None`,
+        description: `Sends an SMS`,
+        fullDescription: `Sends an SMS
+
+Args:
+to_number: recipient number
+from_number: sender number
+content: text content of SMS`,
+        returnType: `dict | None`,
+        parameters: [
+            { name: "to_number", type: `str`, description: `recipient number` },
+            { name: "from_number", type: `str`, description: `sender number` },
+            { name: "content", type: `str`, description: `text content of SMS` },
+            { name: "retry_count", type: `int | None`, default: "None" },
+        ],
+    },
+    "send_whatsapp": {
+        name: "send_whatsapp",
+        kind: "method",
+        signature: `(to_number: str, from_number: str, content_id: str, content: str | None = "", retry_count: int | None = None) -> dict | None`,
+        description: `Sends a WhatsApp message`,
+        fullDescription: `Sends a WhatsApp message
+
+To send a WhatsApp message, the Twilio subaccount must
+use a phone number enabled for WhatsApp. This requires approval
+from Meta, for both the phone number itself and the message template content.
+Once approved, Twillio will provide a \`contentId\`, which must be referenced
+when sending the message.
+
+Args:
+to_number: recipient number
+from_number: sender number
+content: text content of SMS (optional)
+content_id: alphanumeric ID of the message
+retry_count: Number of retries to attempt`,
+        returnType: `dict | None`,
+        parameters: [
+            { name: "to_number", type: `str`, description: `recipient number` },
+            { name: "from_number", type: `str`, description: `sender number` },
+            { name: "content_id", type: `str`, description: `alphanumeric ID of the message` },
+            { name: "content", type: `str | None`, description: `text content of SMS (optional)`, default: "\"\"" },
+            { name: "retry_count", type: `int | None`, description: `Number of retries to attempt`, default: "None" },
+        ],
+    },
+    "send_content_template": {
+        name: "send_content_template",
+        kind: "method",
+        signature: `(messaging_service_id: str, to_number: str, content_id: str, content: str | None = "", whatsapp: bool | None = False, content_variables: dict | None = None, retry_count: int | None = None) -> dict | None`,
+        description: `Sends a WhatsApp message`,
+        fullDescription: `Sends a WhatsApp message
+
+To send a WhatsApp message, the Twilio subaccount must
+use a phone number enabled for WhatsApp. This requires approval
+from Meta, for both the phone number itself and the message template content.
+Once approved, Twillio will provide a \`contentId\`, which must be referenced
+when sending the message.
+
+Args:
+messaging_service_id: messaging service id
+to_number: recipient number
+content: text content of SMS (optional)
+content_id: alphanumeric ID of the message
+whatsapp: set to True, if SMS should be sent over WhatsApp
+content_variables: variables to pass to the message template
+retry_count: Number of retries to attempt`,
+        returnType: `dict | None`,
+        parameters: [
+            { name: "messaging_service_id", type: `str`, description: `messaging service id` },
+            { name: "to_number", type: `str`, description: `recipient number` },
+            { name: "content_id", type: `str`, description: `alphanumeric ID of the message` },
+            { name: "content", type: `str | None`, description: `text content of SMS (optional)`, default: "\"\"" },
+            { name: "whatsapp", type: `bool | None`, description: `set to True, if SMS should be sent over WhatsApp`, default: "False" },
+            { name: "content_variables", type: `dict | None`, description: `variables to pass to the message template`, default: "None" },
+            { name: "retry_count", type: `int | None`, description: `Number of retries to attempt`, default: "None" },
+        ],
+    },
+    "send_sms_template": {
+        name: "send_sms_template",
+        kind: "method",
+        signature: `(to_number: str, template: str, retry_count: int | None = None) -> dict | None`,
+        description: `Sends an SMS template`,
+        fullDescription: `Sends an SMS template
+
+Args:
+to_number: recipient number
+template: SMS template name
+retry_count: Number of retries to attempt`,
+        returnType: `dict | None`,
+        parameters: [
+            { name: "to_number", type: `str`, description: `recipient number` },
+            { name: "template", type: `str`, description: `SMS template name` },
+            { name: "retry_count", type: `int | None`, description: `Number of retries to attempt`, default: "None" },
+        ],
+    },
+    "set_csat_eligibility": {
+        name: "set_csat_eligibility",
+        kind: "method",
+        signature: `(eligible: bool, reason: str | None = None)`,
+        description: `Set whether this conversation is eligible for CSAT surveys.`,
+        fullDescription: `Set whether this conversation is eligible for CSAT surveys.
+
+If set to False, the conversation will be excluded from CSAT regardless of normal
+logic (call type, percentage, weekly caps). If set to True or not called, normal
+CSAT logic applies.
+
+Args:
+eligible: Whether conversation is eligible for CSAT (True/False)
+reason: Optional reason for the decision (for logging/debugging)`,
+        parameters: [
+            { name: "eligible", type: `bool`, description: `Whether conversation is eligible for CSAT (True/False)` },
+            { name: "reason", type: `str | None`, description: `Optional reason for the decision (for logging/debugging)`, default: "None" },
+        ],
+    },
+    "set_csat_phone_number": {
+        name: "set_csat_phone_number",
+        kind: "method",
+        signature: `(phone_number: str)`,
+        description: `Set the phone number to use for CSAT SMS surveys.`,
+        fullDescription: `Set the phone number to use for CSAT SMS surveys.
+
+Use this to override the caller's number for CSAT SMS.
+This is useful when the actual caller phone number is passed via a SIP header
+rather than being the caller ID in cases like IVR.
+
+Args:
+phone_number: The phone number to send CSAT SMS to`,
+        parameters: [
+            { name: "phone_number", type: `str`, description: `The phone number to send CSAT SMS to` },
+        ],
+    },
+    "set_csat_score": {
+        name: "set_csat_score",
+        kind: "method",
+        signature: `(score: int)`,
+        description: `Set the CSAT score for this conversation.`,
+        fullDescription: `Set the CSAT score for this conversation.
+
+This method is used by the platform's CSAT voice survey flow to record
+the customer satisfaction score. The score must be an integer between 1 and 5.
+
+Args:
+score: The CSAT score (1-5)
+
+Raises:
+ValueError: If score is not an integer between 1 and 5`,
+        parameters: [
+            { name: "score", type: `int`, description: `The CSAT score (1-5)` },
+        ],
+    },
+    "set_csat_survey_entered": {
+        name: "set_csat_survey_entered",
+        kind: "method",
+        signature: `()`,
+        description: `Mark that the CSAT survey was entered for this conversation.`,
+        fullDescription: `Mark that the CSAT survey was entered for this conversation.
+
+This method is used by the platform's CSAT voice survey flow to record
+that the customer entered the survey flow.`,
+    },
+    "add_attachments": {
+        name: "add_attachments",
+        kind: "method",
+        signature: `(attachments: list[Attachment]) -> None`,
+        description: `Adds the given attachments to the agent message.`,
+        fullDescription: `Adds the given attachments to the agent message.
+
+Attachments provide additional context or information and are currently only supported for WEBCHAT channels.
+
+Args:
+attachments: A list of \`Attachment\` objects to show in the next message.
+
+Each \`Attachment\` can be of type "image" or "weblink":
+
+- "weblink": Displays the title, preview image, and call-to-action text.
+Clicking the attachment navigates the user to the specified webpage (\`content_url\`).
+- "image": Displays the title (if present), but no call-to-action.
+\`preview_image_url\` should be a lower resolution image, and \`content_url\` should be the full resolution image.
+Clicking the attachment shows a higher resolution version of the image.`,
+        returnType: `None`,
+        parameters: [
+            { name: "attachments", type: `list[Attachment]`, description: `A list of \`Attachment\` objects to show in the next message.` },
+        ],
+    },
+    "set_response_suggestions": {
+        name: "set_response_suggestions",
+        kind: "method",
+        signature: `(suggestions: list[str]) -> None`,
+        description: `Sets response suggestions for the agent message.`,
+        fullDescription: `Sets response suggestions for the agent message.
+
+Response suggestions are quick replies or suggested messages for the user. Each suggestion should be a text string. In supported channels (such as webchat), these appear as clickable options. If the user clicks a suggestion, that text will be sent as their response.
+
+Note:
+Response suggestions are only supported on WEBCHAT channels.
+
+Args:
+suggestions: List of response suggestions (text strings) to show as quick replies.`,
+        returnType: `None`,
+        parameters: [
+            { name: "suggestions", type: `list[str]`, description: `List of response suggestions (text strings) to show as quick replies.` },
+        ],
+    },
+    "generate_external_event": {
+        name: "generate_external_event",
+        kind: "method",
+        signature: `(send_to_llm: bool = False) -> str`,
+        description: `Generate an external event ID which can be sent to some external provider.`,
+        fullDescription: `Generate an external event ID which can be sent to some external provider.
+
+The external provider can send some data back to the Agent by using the
+/v1/external-events/webhook endpoint. The payload of the webhook will then be
+available in the property conv.generic_external_events which is a list of
+events being generated during the duration of the call.
+
+The generated event id is unique per event (invocation of this function) and
+is linked to a specific call. The event id will expire after 1 hour.
+
+Args: send_to_llm: <bool> - Whether, when the webhook is called, the payload
+of the request has to be also directly sent to the LLM (a "system" prompt
+will be used). If "false", the payload will only live in the list
+conv.generic_external_events.
+
+Returns:
+<str> - External event ID`,
+        returnType: `str`,
+        parameters: [
+            { name: "send_to_llm", type: `bool`, default: "False" },
+        ],
+    },
+    "metric_events": {
+        name: "metric_events",
+        kind: "property",
+        description: `List of metric events already written in the conversation.`,
+        returnType: `list[MetricEvent]`,
+    },
+    "write_metric": {
+        name: "write_metric",
+        kind: "method",
+        signature: `(name: str, value: float | int | str | None = None, write_once: bool = False)`,
+        description: `Write a custom metric for call analytics.`,
+        fullDescription: `Write a custom metric for call analytics.
+
+Args:
+name: the name of the metric
+value: the value to write
+write_once: whether the metric should only be written once`,
+        parameters: [
+            { name: "name", type: `str`, description: `the name of the metric` },
+            { name: "value", type: `float | int | str | None`, description: `the value to write`, default: "None" },
+            { name: "write_once", type: `bool`, description: `whether the metric should only be written once`, default: "False" },
+        ],
+    },
+    "call_handoff": {
+        name: "call_handoff",
+        kind: "method",
+        signature: `(destination: str, reason: str = None, utterance: str = None, sip_headers: dict[str, str] | None = None, route: str | None = None)`,
+        description: `Trigger a transfer of the conversation to a live agent`,
+        fullDescription: `Trigger a transfer of the conversation to a live agent
+
+Args:
+destination: handoff destination
+reason: reason for the handoff
+utterance: utterance for the agent to say
+sip_headers: Optional dict of SIP headers to pass through. These headers
+will be merged with any headers configured in the handoff config,
+with passed headers taking precedence.
+route: Optional phone number or route to override the configured route.
+This will overwrite the phone_number in the sip_config, similar to
+how sip_headers can override configured headers.`,
+        parameters: [
+            { name: "destination", type: `str`, description: `handoff destination` },
+            { name: "reason", type: `str`, description: `reason for the handoff`, default: "None" },
+            { name: "utterance", type: `str`, description: `utterance for the agent to say`, default: "None" },
+            { name: "sip_headers", type: `dict[str, str] | None`, description: `Optional dict of SIP headers to pass through. These headers will be merged with any headers configured in the handoff config, with passed headers taking precedence.`, default: "None" },
+            { name: "route", type: `str | None`, description: `Optional phone number or route to override the configured route. This will overwrite the phone_number in the sip_config, similar to how sip_headers can override configured headers.`, default: "None" },
+        ],
+    },
+    "discard_recording": {
+        name: "discard_recording",
+        kind: "method",
+        signature: `()`,
+        description: `Stop any recordings of the current conversation and prevent them from being persisted. Once called, the recording can not be subsequently resumed or retrieved.`,
+        fullDescription: `Stop any recordings of the current conversation and prevent them from being
+persisted. Once called, the recording can not be subsequently resumed or retrieved.`,
+    },
+};
+exports.flowClassDescription = `Object for working within flows`;
+exports.flowMembers = {
+    "function_dir": {
+        name: "function_dir",
+        kind: "property",
+        description: ``,
+    },
+    "current_step": {
+        name: "current_step",
+        kind: "property",
+        description: `The name of the step we're currently in`,
+        returnType: `str`,
+    },
+    "functions": {
+        name: "functions",
+        kind: "property",
+        description: `The functions available to the flow`,
+        returnType: `FlowFunctionExecutor`,
+    },
+    "goto_step": {
+        name: "goto_step",
+        kind: "method",
+        signature: `(step_name: str, label: str | None = None)`,
+        description: `Trigger a transition to a different step`,
+        fullDescription: `Trigger a transition to a different step
+
+Args:
+step_name: name of the step to transition to
+label: used for rendering the condition where relevant but no runtime effect`,
+        parameters: [
+            { name: "step_name", type: `str`, description: `name of the step to transition to` },
+            { name: "label", type: `str | None`, description: `used for rendering the condition where relevant but no runtime effect`, default: "None" },
+        ],
+    },
+};
+
+
+/***/ }),
+/* 38 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.YamlAttrHoverProvider = exports.YamlAttrLinkProvider = exports.YamlFunctionHoverProvider = exports.YamlFunctionLinkProvider = void 0;
+const vscode = __importStar(__webpack_require__(1));
+const pythonFunctionResolver_1 = __webpack_require__(34);
+/** Matches {{fn:function_name}} (global function) and {{ft:function_name}} (flow function) references. */
+const FUNCTION_TAG_PATTERN = /\{\{(fn|ft):(\w+)\}\}/g;
+/** Matches {{attr:attribute_name}} references, which resolve to config/variant_attributes.yaml. */
+const ATTR_TAG_PATTERN = /\{\{attr:(\w+)\}\}/g;
+/**
+ * Finds all {{fn:X}} / {{ft:X}} references on a single line.
+ */
+function findFunctionTagsOnLine(lineText, lineNumber) {
+    const matches = [];
+    FUNCTION_TAG_PATTERN.lastIndex = 0;
+    let match;
+    while ((match = FUNCTION_TAG_PATTERN.exec(lineText)) !== null) {
+        const kind = match[1];
+        const functionName = match[2];
+        const nameStart = match.index + match[0].indexOf(functionName, 3);
+        matches.push({
+            kind,
+            functionName,
+            range: new vscode.Range(new vscode.Position(lineNumber, nameStart), new vscode.Position(lineNumber, nameStart + functionName.length)),
+        });
+    }
+    return matches;
+}
+/**
+ * Resolves a {{fn:X}} / {{ft:X}} reference to its function file path.
+ */
+function resolveFunctionTag(kind, functionName, filePath) {
+    return kind === 'fn'
+        ? pythonFunctionResolver_1.PythonFunctionResolver.resolveConvFunctionPath(functionName, filePath)
+        : pythonFunctionResolver_1.PythonFunctionResolver.resolveFlowFunctionPath(functionName, filePath);
+}
+/** Finds all {{attr:X}} references on a single line. */
+function findAttrTagsOnLine(lineText, lineNumber) {
+    const matches = [];
+    ATTR_TAG_PATTERN.lastIndex = 0;
+    let match;
+    while ((match = ATTR_TAG_PATTERN.exec(lineText)) !== null) {
+        const attrName = match[1];
+        const nameStart = match.index + match[0].indexOf(attrName, 2);
+        matches.push({
+            attrName,
+            range: new vscode.Range(new vscode.Position(lineNumber, nameStart), new vscode.Position(lineNumber, nameStart + attrName.length)),
+        });
+    }
+    return matches;
+}
+/**
+ * Document link provider for {{fn:X}} / {{ft:X}} references in YAML files.
+ * Mirrors PythonFunctionLinkProvider so Cmd/Ctrl-click navigates straight to the function file.
+ */
+class YamlFunctionLinkProvider {
+    provideDocumentLinks(document, _token) {
+        const links = [];
+        for (let i = 0; i < document.lineCount; i++) {
+            const lineText = document.lineAt(i).text;
+            if (!lineText.includes('{{fn:') && !lineText.includes('{{ft:')) {
+                continue;
+            }
+            for (const tag of findFunctionTagsOnLine(lineText, i)) {
+                const functionPath = resolveFunctionTag(tag.kind, tag.functionName, document.uri.fsPath);
+                if (functionPath) {
+                    links.push(new vscode.DocumentLink(tag.range, vscode.Uri.file(functionPath)));
+                }
+            }
+        }
+        return links;
+    }
+}
+exports.YamlFunctionLinkProvider = YamlFunctionLinkProvider;
+/**
+ * Hover provider for {{fn:X}} / {{ft:X}} references in YAML files.
+ * Shows the resolved function's description and parameters, reusing the same
+ * @func_description / @func_parameter extraction used for Python conv/flow.functions hovers.
+ */
+class YamlFunctionHoverProvider {
+    provideHover(document, position, _token) {
+        const lineText = document.lineAt(position).text;
+        if (!lineText.includes('{{fn:') && !lineText.includes('{{ft:')) {
+            return undefined;
+        }
+        const tag = findFunctionTagsOnLine(lineText, position.line).find(t => position.character >= t.range.start.character && position.character <= t.range.end.character);
+        if (!tag) {
+            return undefined;
+        }
+        const functionPath = resolveFunctionTag(tag.kind, tag.functionName, document.uri.fsPath);
+        if (!functionPath) {
+            return undefined;
+        }
+        const description = pythonFunctionResolver_1.PythonFunctionResolver.getFunctionDescription(functionPath);
+        const parameters = pythonFunctionResolver_1.PythonFunctionResolver.getFunctionParameters(functionPath);
+        const functionType = tag.kind === 'fn' ? 'Global function' : 'Flow function';
+        const hoverText = new vscode.MarkdownString();
+        hoverText.appendMarkdown(`**${functionType}**: \`${tag.functionName}\``);
+        if (description) {
+            hoverText.appendMarkdown(`\n\n${description}`);
+        }
+        if (parameters.length > 0) {
+            hoverText.appendMarkdown(`\n\n**Parameters:**`);
+            for (const param of parameters) {
+                hoverText.appendMarkdown(param.description ? `\n- \`${param.name}\`: ${param.description}` : `\n- \`${param.name}\``);
+            }
+        }
+        hoverText.appendMarkdown(`\n\n*${functionPath}*`);
+        return new vscode.Hover(hoverText, tag.range);
+    }
+}
+exports.YamlFunctionHoverProvider = YamlFunctionHoverProvider;
+/**
+ * Document link provider for {{attr:X}} references in YAML files.
+ * {{attr:X}} resolves to the `- name: X` entry under `attributes:` in config/variant_attributes.yaml.
+ */
+class YamlAttrLinkProvider {
+    provideDocumentLinks(document, _token) {
+        const links = [];
+        for (let i = 0; i < document.lineCount; i++) {
+            const lineText = document.lineAt(i).text;
+            if (!lineText.includes('{{attr:')) {
+                continue;
+            }
+            for (const tag of findAttrTagsOnLine(lineText, i)) {
+                const location = pythonFunctionResolver_1.PythonFunctionResolver.resolveVariantAttributeLocation(tag.attrName, document.uri.fsPath);
+                if (location) {
+                    const target = vscode.Uri.file(location.filePath).with({ fragment: `${location.line + 1}` });
+                    links.push(new vscode.DocumentLink(tag.range, target));
+                }
+            }
+        }
+        return links;
+    }
+}
+exports.YamlAttrLinkProvider = YamlAttrLinkProvider;
+/**
+ * Hover provider for {{attr:X}} references in YAML files.
+ * Shows where the attribute is defined in config/variant_attributes.yaml.
+ */
+class YamlAttrHoverProvider {
+    provideHover(document, position, _token) {
+        const lineText = document.lineAt(position).text;
+        if (!lineText.includes('{{attr:')) {
+            return undefined;
+        }
+        const tag = findAttrTagsOnLine(lineText, position.line).find(t => position.character >= t.range.start.character && position.character <= t.range.end.character);
+        if (!tag) {
+            return undefined;
+        }
+        const location = pythonFunctionResolver_1.PythonFunctionResolver.resolveVariantAttributeLocation(tag.attrName, document.uri.fsPath);
+        if (!location) {
+            return undefined;
+        }
+        const hoverText = new vscode.MarkdownString();
+        hoverText.appendMarkdown(`**Variant attribute**: \`${tag.attrName}\``);
+        hoverText.appendMarkdown(`\n\n*${location.filePath}:${location.line + 1}*`);
+        return new vscode.Hover(hoverText, tag.range);
+    }
+}
+exports.YamlAttrHoverProvider = YamlAttrHoverProvider;
+
+
+/***/ }),
+/* 39 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -6497,10 +7924,10 @@ const vscode = __importStar(__webpack_require__(1));
 const path = __importStar(__webpack_require__(2));
 const fs = __importStar(__webpack_require__(3));
 const pythonFunctionResolver_1 = __webpack_require__(34);
-const debug_1 = __webpack_require__(35);
-const pythonRules_1 = __webpack_require__(37);
-const yamlRules_1 = __webpack_require__(38);
-const config_1 = __webpack_require__(39);
+const debug_1 = __webpack_require__(36);
+const pythonRules_1 = __webpack_require__(40);
+const yamlRules_1 = __webpack_require__(41);
+const config_1 = __webpack_require__(42);
 /**
  * Agent Studio Linter
  * Provides real-time diagnostics for Agent Studio projects based on cursor rules
@@ -6713,7 +8140,7 @@ exports.AgentStudioLinter = AgentStudioLinter;
 
 
 /***/ }),
-/* 37 */
+/* 40 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -7627,7 +9054,7 @@ function checkGotoFlowExists(lines, filePath, overrideFlowNames) {
 
 
 /***/ }),
-/* 38 */
+/* 41 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -7670,6 +9097,7 @@ const path = __importStar(__webpack_require__(2));
 const fs = __importStar(__webpack_require__(3));
 // @ts-ignore - js-yaml types may not be available
 const yaml = __importStar(__webpack_require__(4));
+const functionPathResolver_1 = __webpack_require__(35);
 /**
  * Checks a YAML file for Agent Studio rule violations
  * @param text - The file content as a string
@@ -7689,6 +9117,54 @@ function checkYamlFile(text, filePath, options) {
     }
     else if (isTopicFile(filePath)) {
         diagnostics.push(...checkTopicFile(lines, text));
+    }
+    // {{fn:X}} / {{ft:X}} / {{attr:X}} references are valid in any YAML file (steps, topics, etc.)
+    diagnostics.push(...checkFunctionTagReferences(lines, filePath, options));
+    diagnostics.push(...checkAttrTagReferences(lines, filePath, options));
+    return diagnostics;
+}
+/** Matches {{fn:function_name}} (global function) and {{ft:function_name}} (flow function) references. */
+const FUNCTION_TAG_PATTERN = /\{\{(fn|ft):(\w+)\}\}/g;
+/** Matches {{attr:attribute_name}} references, which resolve to config/variant_attributes.yaml. */
+const ATTR_TAG_PATTERN = /\{\{attr:(\w+)\}\}/g;
+/**
+ * Rule: invalid-function-tag
+ * {{fn:X}} must resolve to a global function file (functions/X.py), and
+ * {{ft:X}} must resolve to a flow-local function file (flows/<flow>/functions/X.py).
+ */
+function checkFunctionTagReferences(lines, filePath, options) {
+    const diagnostics = [];
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        const line = lines[lineIndex];
+        if (!line.includes('{{fn:') && !line.includes('{{ft:')) {
+            continue;
+        }
+        FUNCTION_TAG_PATTERN.lastIndex = 0;
+        let match;
+        while ((match = FUNCTION_TAG_PATTERN.exec(line)) !== null) {
+            const kind = match[1];
+            const functionName = match[2];
+            const resolved = kind === 'fn'
+                ? (options?.knownGlobalFunctions
+                    ? options.knownGlobalFunctions.includes(functionName)
+                    : functionPathResolver_1.FunctionPathResolver.resolveConvFunctionPath(functionName, filePath) !== null)
+                : (options?.knownFlowFunctions
+                    ? options.knownFlowFunctions.includes(functionName)
+                    : functionPathResolver_1.FunctionPathResolver.resolveFlowFunctionPath(functionName, filePath) !== null);
+            if (!resolved) {
+                const expectedLocation = kind === 'fn'
+                    ? 'functions/'
+                    : 'flows/<flow_name>/functions/';
+                diagnostics.push({
+                    line: lineIndex,
+                    startChar: match.index,
+                    endChar: match.index + match[0].length,
+                    message: `{{${kind}:${functionName}}} does not resolve to a function. Expected a file at ${expectedLocation}${functionName}.py.`,
+                    severity: 'error',
+                    code: 'invalid-function-tag'
+                });
+            }
+        }
     }
     return diagnostics;
 }
@@ -8027,6 +9503,42 @@ function checkChildStepExists(lines, conditions, filePath, overrideTargets) {
     return diagnostics;
 }
 /**
+ * Rule: invalid-attr-tag
+ * {{attr:X}} must resolve to a `- name: X` entry under `attributes:` in config/variant_attributes.yaml.
+ */
+function checkAttrTagReferences(lines, filePath, options) {
+    const diagnostics = [];
+    const hasAttrTag = lines.some(line => line.includes('{{attr:'));
+    if (!hasAttrTag) {
+        return diagnostics;
+    }
+    const attributeNames = options?.knownAttributeNames
+        ? new Set(options.knownAttributeNames)
+        : functionPathResolver_1.FunctionPathResolver.findVariantAttributeNames(filePath);
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        const line = lines[lineIndex];
+        if (!line.includes('{{attr:')) {
+            continue;
+        }
+        ATTR_TAG_PATTERN.lastIndex = 0;
+        let match;
+        while ((match = ATTR_TAG_PATTERN.exec(line)) !== null) {
+            const attrName = match[1];
+            if (!attributeNames.has(attrName)) {
+                diagnostics.push({
+                    line: lineIndex,
+                    startChar: match.index,
+                    endChar: match.index + match[0].length,
+                    message: `{{attr:${attrName}}} does not resolve to an attribute in config/variant_attributes.yaml.`,
+                    severity: 'error',
+                    code: 'invalid-attr-tag'
+                });
+            }
+        }
+    }
+    return diagnostics;
+}
+/**
  * Finds the line number of a specific child_step value in the YAML text
  */
 function findChildStepLine(lines, value) {
@@ -8053,7 +9565,7 @@ function findYamlKeyLine(lines, key) {
 
 
 /***/ }),
-/* 39 */
+/* 42 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
