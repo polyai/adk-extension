@@ -57,6 +57,14 @@ const FUNCTION_TAG_PATTERN = /\{\{(fn|ft):(\w+)\}\}/g;
 const ATTR_TAG_PATTERN = /\{\{attr:(\w+)\}\}/g;
 
 /**
+ * True if the line is entirely a YAML comment (ignoring leading whitespace).
+ * Used to skip commented-out {{fn:}}/{{ft:}}/{{attr:}} references, which aren't live config.
+ */
+function isFullLineComment(line: string): boolean {
+	return line.trim().startsWith('#');
+}
+
+/**
  * Rule: invalid-function-tag
  * {{fn:X}} must resolve to a global function file (functions/X.py), and
  * {{ft:X}} must resolve to a flow-local function file (flows/<flow>/functions/X.py).
@@ -67,6 +75,9 @@ function checkFunctionTagReferences(lines: string[], filePath: string, options?:
 	for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
 		const line = lines[lineIndex];
 		if (!line.includes('{{fn:') && !line.includes('{{ft:')) {
+			continue;
+		}
+		if (isFullLineComment(line)) {
 			continue;
 		}
 
@@ -506,6 +517,9 @@ function checkAttrTagReferences(lines: string[], filePath: string, options?: Yam
 	for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
 		const line = lines[lineIndex];
 		if (!line.includes('{{attr:')) {
+			continue;
+		}
+		if (isFullLineComment(line)) {
 			continue;
 		}
 

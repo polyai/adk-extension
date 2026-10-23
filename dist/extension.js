@@ -6717,14 +6717,19 @@ class FunctionPathResolver {
     }
     /**
      * Finds the project's config/variant_attributes.yaml, which defines {{attr:X}} targets.
+     * Walks up from the file independently of findProjectRoot, since a project can have
+     * variant_attributes.yaml without a global functions/ directory (e.g. all-flow-scoped projects).
      */
     static findVariantAttributesPath(filePath) {
-        const projectRoot = this.findProjectRoot(filePath);
-        if (!projectRoot) {
-            return null;
+        let currentDir = path.dirname(filePath);
+        while (currentDir !== path.dirname(currentDir)) {
+            const attrPath = path.join(currentDir, 'config', 'variant_attributes.yaml');
+            if (fs.existsSync(attrPath)) {
+                return attrPath;
+            }
+            currentDir = path.dirname(currentDir);
         }
-        const attrPath = path.join(projectRoot, 'config', 'variant_attributes.yaml');
-        return fs.existsSync(attrPath) ? attrPath : null;
+        return null;
     }
     /**
      * Finds all distinct attribute names defined under `attributes:` in config/variant_attributes.yaml.
@@ -6765,13 +6770,41 @@ class FunctionPathResolver {
         const lines = content.split('\n');
         // Only search within the `attributes:` section — `variants:` has same-shaped `- name: X` entries.
         const attributesKeyLine = lines.findIndex(line => /^attributes:\s*$/.test(line));
-        const searchStart = attributesKeyLine === -1 ? 0 : attributesKeyLine;
+        if (attributesKeyLine === -1) {
+            return null;
+        }
+        // Matches a `name:` key (list-item or plain mapping key) with an unquoted/quoted scalar
+        // value, tolerating a trailing comment. Doesn't require `name:` to be the entry's first key,
+        // so reordered keys (e.g. `values:` before `name:`) still resolve.
         const escapedName = attrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const namePattern = new RegExp(`^(\\s*-\\s*name:\\s*["']?)${escapedName}["']?\\s*$`);
-        for (let i = searchStart; i < lines.length; i++) {
-            const match = namePattern.exec(lines[i]);
+        const namePattern = new RegExp(`^(\\s*(?:-\\s*)?name:\\s*)(["']?)${escapedName}\\2\\s*(?:#.*)?$`);
+        // Track the attribute list's item indent (the `- ` under `attributes:`) so we stop once
+        // we dedent out of the list, rather than matching into an unrelated later section.
+        let itemIndent = null;
+        for (let i = attributesKeyLine + 1; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.trim() === '') {
+                continue;
+            }
+            const dashMatch = line.match(/^(\s*)-\s/);
+            if (dashMatch) {
+                const indent = dashMatch[1].length;
+                if (itemIndent === null) {
+                    itemIndent = indent;
+                }
+                else if (indent < itemIndent) {
+                    break; // dedented out of the attributes list
+                }
+            }
+            else {
+                const indent = line.match(/^(\s*)/)[1].length;
+                if (itemIndent !== null && indent === 0) {
+                    break; // back to a top-level key — end of the attributes list
+                }
+            }
+            const match = namePattern.exec(line);
             if (match) {
-                return { filePath: attrPath, line: i, character: match[1].length };
+                return { filePath: attrPath, line: i, character: match[1].length + match[2].length };
             }
         }
         return null;
@@ -7736,7 +7769,10 @@ function findFunctionTagsOnLine(lineText, lineNumber) {
     while ((match = FUNCTION_TAG_PATTERN.exec(lineText)) !== null) {
         const kind = match[1];
         const functionName = match[2];
-        const nameStart = match.index + match[0].indexOf(functionName, 3);
+        // "{{" + kind ("fn"/"ft") + ":" always precedes the name — compute the offset
+        // analytically rather than searching for the name text, which can falsely match
+        // inside the prefix itself (e.g. name "n" inside "{{fn:n}}").
+        const nameStart = match.index + 2 + kind.length + 1;
         matches.push({
             kind,
             functionName,
@@ -7760,7 +7796,9 @@ function findAttrTagsOnLine(lineText, lineNumber) {
     let match;
     while ((match = ATTR_TAG_PATTERN.exec(lineText)) !== null) {
         const attrName = match[1];
-        const nameStart = match.index + match[0].indexOf(attrName, 2);
+        // "{{attr:" is always 7 chars — compute the offset analytically rather than searching
+        // for the name text, which can falsely match inside the prefix (e.g. name "attr" inside "{{attr:attr}}").
+        const nameStart = match.index + '{{attr:'.length;
         matches.push({
             attrName,
             range: new vscode.Range(new vscode.Position(lineNumber, nameStart), new vscode.Position(lineNumber, nameStart + attrName.length)),
@@ -9128,6 +9166,13 @@ const FUNCTION_TAG_PATTERN = /\{\{(fn|ft):(\w+)\}\}/g;
 /** Matches {{attr:attribute_name}} references, which resolve to config/variant_attributes.yaml. */
 const ATTR_TAG_PATTERN = /\{\{attr:(\w+)\}\}/g;
 /**
+ * True if the line is entirely a YAML comment (ignoring leading whitespace).
+ * Used to skip commented-out {{fn:}}/{{ft:}}/{{attr:}} references, which aren't live config.
+ */
+function isFullLineComment(line) {
+    return line.trim().startsWith('#');
+}
+/**
  * Rule: invalid-function-tag
  * {{fn:X}} must resolve to a global function file (functions/X.py), and
  * {{ft:X}} must resolve to a flow-local function file (flows/<flow>/functions/X.py).
@@ -9137,6 +9182,9 @@ function checkFunctionTagReferences(lines, filePath, options) {
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
         if (!line.includes('{{fn:') && !line.includes('{{ft:')) {
+            continue;
+        }
+        if (isFullLineComment(line)) {
             continue;
         }
         FUNCTION_TAG_PATTERN.lastIndex = 0;
@@ -9518,6 +9566,9 @@ function checkAttrTagReferences(lines, filePath, options) {
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
         if (!line.includes('{{attr:')) {
+            continue;
+        }
+        if (isFullLineComment(line)) {
             continue;
         }
         ATTR_TAG_PATTERN.lastIndex = 0;

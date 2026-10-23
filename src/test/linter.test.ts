@@ -1382,6 +1382,19 @@ actions: "Call {{fn:unknown_fn}} to transfer."
 			);
 			assert.ok(hasRule(diagnostics, 'invalid-function-tag'));
 		});
+
+		test('should not flag an unresolved reference inside a commented-out line', () => {
+			const yaml = `
+name: "My Step"
+# prompt: "Call {{fn:old_function}}"
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/flows/test_flow/steps/my_step.yaml',
+				{ knownGlobalFunctions: [], knownFlowFunctions: [] }
+			);
+			assert.ok(!hasRule(diagnostics, 'invalid-function-tag'));
+		});
 	});
 
 	suite('invalid-attr-tag', () => {
@@ -1424,6 +1437,19 @@ prompt: "Call {{fn:handoff}}."
 				yaml,
 				'/project/flows/test_flow/steps/my_step.yaml',
 				{ knownGlobalFunctions: ['handoff'], knownAttributeNames: [] }
+			);
+			assert.ok(!hasRule(diagnostics, 'invalid-attr-tag'));
+		});
+
+		test('should not flag an unresolved reference inside a commented-out line', () => {
+			const yaml = `
+name: "test_topic"
+# {{attr:removed_attribute}}
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/topics/test_topic.yaml',
+				{ knownAttributeNames: [] }
 			);
 			assert.ok(!hasRule(diagnostics, 'invalid-attr-tag'));
 		});

@@ -244,14 +244,21 @@ export class FunctionPathResolver {
 
 	/**
 	 * Finds the project's config/variant_attributes.yaml, which defines {{attr:X}} targets.
+	 * Walks up from the file independently of findProjectRoot, since a project can have
+	 * variant_attributes.yaml without a global functions/ directory (e.g. all-flow-scoped projects).
 	 */
 	static findVariantAttributesPath(filePath: string): string | null {
-		const projectRoot = this.findProjectRoot(filePath);
-		if (!projectRoot) {
-			return null;
+		let currentDir = path.dirname(filePath);
+
+		while (currentDir !== path.dirname(currentDir)) {
+			const attrPath = path.join(currentDir, 'config', 'variant_attributes.yaml');
+			if (fs.existsSync(attrPath)) {
+				return attrPath;
+			}
+			currentDir = path.dirname(currentDir);
 		}
-		const attrPath = path.join(projectRoot, 'config', 'variant_attributes.yaml');
-		return fs.existsSync(attrPath) ? attrPath : null;
+
+		return null;
 	}
 
 	/**
@@ -301,15 +308,44 @@ export class FunctionPathResolver {
 
 		// Only search within the `attributes:` section — `variants:` has same-shaped `- name: X` entries.
 		const attributesKeyLine = lines.findIndex(line => /^attributes:\s*$/.test(line));
-		const searchStart = attributesKeyLine === -1 ? 0 : attributesKeyLine;
+		if (attributesKeyLine === -1) {
+			return null;
+		}
 
+		// Matches a `name:` key (list-item or plain mapping key) with an unquoted/quoted scalar
+		// value, tolerating a trailing comment. Doesn't require `name:` to be the entry's first key,
+		// so reordered keys (e.g. `values:` before `name:`) still resolve.
 		const escapedName = attrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const namePattern = new RegExp(`^(\\s*-\\s*name:\\s*["']?)${escapedName}["']?\\s*$`);
+		const namePattern = new RegExp(`^(\\s*(?:-\\s*)?name:\\s*)(["']?)${escapedName}\\2\\s*(?:#.*)?$`);
 
-		for (let i = searchStart; i < lines.length; i++) {
-			const match = namePattern.exec(lines[i]);
+		// Track the attribute list's item indent (the `- ` under `attributes:`) so we stop once
+		// we dedent out of the list, rather than matching into an unrelated later section.
+		let itemIndent: number | null = null;
+
+		for (let i = attributesKeyLine + 1; i < lines.length; i++) {
+			const line = lines[i];
+			if (line.trim() === '') {
+				continue;
+			}
+
+			const dashMatch = line.match(/^(\s*)-\s/);
+			if (dashMatch) {
+				const indent = dashMatch[1].length;
+				if (itemIndent === null) {
+					itemIndent = indent;
+				} else if (indent < itemIndent) {
+					break; // dedented out of the attributes list
+				}
+			} else {
+				const indent = line.match(/^(\s*)/)![1].length;
+				if (itemIndent !== null && indent === 0) {
+					break; // back to a top-level key — end of the attributes list
+				}
+			}
+
+			const match = namePattern.exec(line);
 			if (match) {
-				return { filePath: attrPath, line: i, character: match[1].length };
+				return { filePath: attrPath, line: i, character: match[1].length + match[2].length };
 			}
 		}
 

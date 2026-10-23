@@ -19,7 +19,10 @@ function findFunctionTagsOnLine(lineText: string, lineNumber: number): FunctionT
 	while ((match = FUNCTION_TAG_PATTERN.exec(lineText)) !== null) {
 		const kind = match[1] as 'fn' | 'ft';
 		const functionName = match[2];
-		const nameStart = match.index + match[0].indexOf(functionName, 3);
+		// "{{" + kind ("fn"/"ft") + ":" always precedes the name — compute the offset
+		// analytically rather than searching for the name text, which can falsely match
+		// inside the prefix itself (e.g. name "n" inside "{{fn:n}}").
+		const nameStart = match.index + 2 + kind.length + 1;
 		matches.push({
 			kind,
 			functionName,
@@ -48,7 +51,9 @@ function findAttrTagsOnLine(lineText: string, lineNumber: number): { attrName: s
 	let match: RegExpExecArray | null;
 	while ((match = ATTR_TAG_PATTERN.exec(lineText)) !== null) {
 		const attrName = match[1];
-		const nameStart = match.index + match[0].indexOf(attrName, 2);
+		// "{{attr:" is always 7 chars — compute the offset analytically rather than searching
+		// for the name text, which can falsely match inside the prefix (e.g. name "attr" inside "{{attr:attr}}").
+		const nameStart = match.index + '{{attr:'.length;
 		matches.push({
 			attrName,
 			range: new vscode.Range(
