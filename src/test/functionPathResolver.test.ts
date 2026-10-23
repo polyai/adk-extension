@@ -20,6 +20,18 @@ suite('FunctionPathResolver', () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
+	function writeProject(variantAttributesContent: string): string {
+		const configDir = path.join(tmpDir, 'config');
+		fs.mkdirSync(configDir, { recursive: true });
+		const attrPath = path.join(configDir, 'variant_attributes.yaml');
+		fs.writeFileSync(attrPath, variantAttributesContent);
+
+		const stepFile = path.join(tmpDir, 'topics', 'some_topic.yaml');
+		fs.mkdirSync(path.dirname(stepFile), { recursive: true });
+		fs.writeFileSync(stepFile, 'name: some_topic\n');
+		return stepFile;
+	}
+
 	suite('findVariantAttributesPath', () => {
 		test('finds config/variant_attributes.yaml even without a global functions/ directory', () => {
 			// Project has flows/ and config/, but no top-level functions/ — findProjectRoot
@@ -43,18 +55,6 @@ suite('FunctionPathResolver', () => {
 	});
 
 	suite('resolveVariantAttributeLocation', () => {
-		function writeProject(variantAttributesContent: string): string {
-			const configDir = path.join(tmpDir, 'config');
-			fs.mkdirSync(configDir, { recursive: true });
-			const attrPath = path.join(configDir, 'variant_attributes.yaml');
-			fs.writeFileSync(attrPath, variantAttributesContent);
-
-			const stepFile = path.join(tmpDir, 'topics', 'some_topic.yaml');
-			fs.mkdirSync(path.dirname(stepFile), { recursive: true });
-			fs.writeFileSync(stepFile, 'name: some_topic\n');
-			return stepFile;
-		}
-
 		test('resolves a name entry with a trailing comment', () => {
 			const stepFile = writeProject(
 				'attributes:\n' +
@@ -132,6 +132,46 @@ suite('FunctionPathResolver', () => {
 			const location = FunctionPathResolver.resolveVariantAttributeLocation('site_name', stepFile);
 			assert.ok(location);
 			assert.strictEqual(location!.line, 7);
+		});
+
+		test('resolves a dash-only entry whose keys are indented on following lines', () => {
+			const stepFile = writeProject(
+				'attributes:\n' +
+				'  -\n' +
+				'    name: site_name\n' +
+				'    values:\n' +
+				'      voice: Example Site\n'
+			);
+
+			const location = FunctionPathResolver.resolveVariantAttributeLocation('site_name', stepFile);
+			assert.ok(location);
+			assert.strictEqual(location!.line, 2);
+		});
+
+		test('resolves a flow-style (inline) attributes definition', () => {
+			const stepFile = writeProject(
+				'attributes: [{name: site_name, values: {voice: Example Site}}]\n'
+			);
+
+			const location = FunctionPathResolver.resolveVariantAttributeLocation('site_name', stepFile);
+			assert.ok(location);
+			assert.strictEqual(location!.line, 0);
+		});
+	});
+
+	suite('buildVariantAttributeIndex', () => {
+		test('indexes every attribute in one pass, reusable across multiple lookups', () => {
+			const stepFile = writeProject(
+				'attributes:\n' +
+				'  - name: site_name\n' +
+				'  - name: greeting\n'
+			);
+
+			const index = FunctionPathResolver.buildVariantAttributeIndex(stepFile);
+			assert.strictEqual(index.size, 2);
+			assert.strictEqual(index.get('site_name')?.line, 1);
+			assert.strictEqual(index.get('greeting')?.line, 2);
+			assert.strictEqual(index.get('missing'), undefined);
 		});
 	});
 });

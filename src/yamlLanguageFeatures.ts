@@ -159,14 +159,20 @@ export class YamlAttrLinkProvider implements vscode.DocumentLinkProvider {
 	): vscode.ProviderResult<vscode.DocumentLink[]> {
 		const links: vscode.DocumentLink[] = [];
 
+		// Build the name -> location index once for the whole document, rather than re-reading
+		// and re-scanning config/variant_attributes.yaml for every {{attr:X}} occurrence.
+		let attributeIndex: Map<string, { filePath: string; line: number; character: number }> | null = null;
+
 		for (let i = 0; i < document.lineCount; i++) {
 			const lineText = document.lineAt(i).text;
 			if (!lineText.includes('{{attr:')) {
 				continue;
 			}
 
+			attributeIndex ??= PythonFunctionResolver.buildVariantAttributeIndex(document.uri.fsPath);
+
 			for (const tag of findAttrTagsOnLine(lineText, i)) {
-				const location = PythonFunctionResolver.resolveVariantAttributeLocation(tag.attrName, document.uri.fsPath);
+				const location = attributeIndex.get(tag.attrName);
 				if (location) {
 					const target = vscode.Uri.file(location.filePath).with({ fragment: `${location.line + 1}` });
 					links.push(new vscode.DocumentLink(tag.range, target));

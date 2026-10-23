@@ -86,4 +86,10 @@ export class PythonFunctionResolver {
 	): { filePath: string; line: number; character: number } | null {
 		return FunctionPathResolver.resolveVariantAttributeLocation(attrName, filePath);
 	}
+
+	static buildVariantAttributeIndex(
+		filePath: string
+	): Map<string, { filePath: string; line: number; character: number }> {
+		return FunctionPathResolver.buildVariantAttributeIndex(filePath);
+	}
 }

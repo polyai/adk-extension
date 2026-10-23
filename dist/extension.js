@@ -6463,6 +6463,9 @@ class PythonFunctionResolver {
     static resolveVariantAttributeLocation(attrName, filePath) {
         return functionPathResolver_1.FunctionPathResolver.resolveVariantAttributeLocation(attrName, filePath);
     }
+    static buildVariantAttributeIndex(filePath) {
+        return functionPathResolver_1.FunctionPathResolver.buildVariantAttributeIndex(filePath);
+    }
 }
 exports.PythonFunctionResolver = PythonFunctionResolver;
 
@@ -6754,17 +6757,18 @@ class FunctionPathResolver {
         }
         return names;
     }
+    /** Matches a `name:` key (list-item or plain mapping key), capturing its value and tolerating a trailing comment. */
+    static ATTRIBUTE_NAME_LINE_PATTERN = /^(\s*(?:-\s*)?name:\s*)(["']?)([^"'#\s]+)\2\s*(?:#.*)?$/;
     /**
-     * Finds the `- name: attrName` entry under `attributes:` in config/variant_attributes.yaml, for navigation.
-     * Returns the file path and 0-based line/character of the start of the attribute name.
+     * Builds a name -> location index for every attribute entry in config/variant_attributes.yaml,
+     * in a single read + scan. Used instead of re-reading/re-scanning the file per {{attr:X}}
+     * reference, which would otherwise repeat O(file size) work for every tag in a document.
      */
-    static resolveVariantAttributeLocation(attrName, filePath) {
+    static buildVariantAttributeIndex(filePath) {
+        const index = new Map();
         const attrPath = this.findVariantAttributesPath(filePath);
         if (!attrPath) {
-            return null;
-        }
-        if (!this.findVariantAttributeNames(filePath).has(attrName)) {
-            return null;
+            return index;
         }
         const content = fs.readFileSync(attrPath, 'utf8');
         const lines = content.split('\n');
@@ -6772,23 +6776,38 @@ class FunctionPathResolver {
         // Allow a trailing comment on the section header itself (e.g. `attributes: # project attributes`).
         const attributesKeyLine = lines.findIndex(line => /^attributes:\s*(#.*)?$/.test(line));
         if (attributesKeyLine === -1) {
-            return null;
+            // Not block-style YAML (e.g. a flow-style `attributes: [{name: x, ...}]`, possibly
+            // spanning multiple lines). Fall back to a loose scan so these still resolve, just
+            // without the precision of the block-style walk below.
+            this.indexFlowStyleAttributes(lines, attrPath, index);
+            return index;
         }
-        // Matches a `name:` key (list-item or plain mapping key) with an unquoted/quoted scalar
-        // value, tolerating a trailing comment. Doesn't require `name:` to be the entry's first key,
-        // so reordered keys (e.g. `values:` before `name:`) still resolve.
-        const escapedName = attrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const namePattern = new RegExp(`^(\\s*(?:-\\s*)?name:\\s*)(["']?)${escapedName}\\2\\s*(?:#.*)?$`);
         // Track the attribute list's item indent (the `- ` under `attributes:`) and each entry's
         // key indent (the column its mapping keys start at), so we only match `name:` as a direct
         // key of the entry's own mapping — not block-scalar body text or deeper-nested values that
         // happen to contain the literal text "name:".
         let itemIndent = null;
         let entryKeyIndent = null;
+        // True right after a dash-only line (`-` alone, content on the following line(s)), until
+        // the next content line establishes that entry's key indent.
+        let awaitingEntryKeyIndent = false;
         for (let i = attributesKeyLine + 1; i < lines.length; i++) {
             const line = lines[i];
             if (line.trim() === '' || /^\s*#/.test(line)) {
                 continue; // blank lines and full-line comments don't affect list structure
+            }
+            if (/^(\s*)-\s*$/.test(line)) {
+                // Dash-only list marker; its content (and key indent) is established by the next line.
+                const indent = line.match(/^(\s*)/)[1].length;
+                if (itemIndent === null) {
+                    itemIndent = indent;
+                }
+                else if (indent < itemIndent) {
+                    break; // dedented out of the attributes list
+                }
+                entryKeyIndent = null;
+                awaitingEntryKeyIndent = true;
+                continue;
             }
             const dashMatch = line.match(/^(\s*)-\s+/);
             let lineKeyIndent;
@@ -6803,6 +6822,7 @@ class FunctionPathResolver {
                 if (indent === itemIndent) {
                     entryKeyIndent = dashMatch[0].length; // new entry: its keys start right after "- "
                 }
+                awaitingEntryKeyIndent = false;
                 lineKeyIndent = dashMatch[0].length;
             }
             else {
@@ -6810,17 +6830,56 @@ class FunctionPathResolver {
                 if (indent === 0) {
                     break; // back to a top-level key — end of the attributes list
                 }
+                if (awaitingEntryKeyIndent) {
+                    entryKeyIndent = indent; // first content line of a dash-only entry sets its key indent
+                    awaitingEntryKeyIndent = false;
+                }
                 lineKeyIndent = indent;
             }
             if (entryKeyIndent === null || lineKeyIndent !== entryKeyIndent) {
                 continue; // not a direct key of the current entry's mapping
             }
-            const match = namePattern.exec(line);
-            if (match) {
-                return { filePath: attrPath, line: i, character: match[1].length + match[2].length };
+            const match = this.ATTRIBUTE_NAME_LINE_PATTERN.exec(line);
+            if (match && !index.has(match[3])) {
+                index.set(match[3], { filePath: attrPath, line: i, character: match[1].length + match[2].length });
             }
         }
-        return null;
+        return index;
+    }
+    /**
+     * Loose fallback for flow-style attribute definitions (e.g. `attributes: [{name: x, ...}]`),
+     * which the block-style walk above can't parse. Scans from the `attributes:` line onward for
+     * any `name: value` pair, without the block-style walk's indentation precision.
+     */
+    static indexFlowStyleAttributes(lines, attrPath, index) {
+        const attributesStart = lines.findIndex(line => /^attributes:\s*(\[|#|$)/.test(line));
+        if (attributesStart === -1) {
+            return;
+        }
+        const looseNamePattern = /name:\s*(["']?)([^"',}\]#\s]+)\1/g;
+        for (let i = attributesStart; i < lines.length; i++) {
+            const line = lines[i];
+            // A later unindented key ends the attributes section (skip the `attributes:` line itself).
+            if (i > attributesStart && /^\S/.test(line)) {
+                break;
+            }
+            looseNamePattern.lastIndex = 0;
+            let match;
+            while ((match = looseNamePattern.exec(line)) !== null) {
+                const name = match[2];
+                if (!index.has(name)) {
+                    const nameStart = match.index + match[0].indexOf(name, match[0].indexOf(':') + 1);
+                    index.set(name, { filePath: attrPath, line: i, character: nameStart });
+                }
+            }
+        }
+    }
+    /**
+     * Finds the `- name: attrName` entry under `attributes:` in config/variant_attributes.yaml, for navigation.
+     * Returns the file path and 0-based line/character of the start of the attribute name.
+     */
+    static resolveVariantAttributeLocation(attrName, filePath) {
+        return this.buildVariantAttributeIndex(filePath).get(attrName) ?? null;
     }
 }
 exports.FunctionPathResolver = FunctionPathResolver;
@@ -7887,13 +7946,17 @@ exports.YamlFunctionHoverProvider = YamlFunctionHoverProvider;
 class YamlAttrLinkProvider {
     provideDocumentLinks(document, _token) {
         const links = [];
+        // Build the name -> location index once for the whole document, rather than re-reading
+        // and re-scanning config/variant_attributes.yaml for every {{attr:X}} occurrence.
+        let attributeIndex = null;
         for (let i = 0; i < document.lineCount; i++) {
             const lineText = document.lineAt(i).text;
             if (!lineText.includes('{{attr:')) {
                 continue;
             }
+            attributeIndex ??= pythonFunctionResolver_1.PythonFunctionResolver.buildVariantAttributeIndex(document.uri.fsPath);
             for (const tag of findAttrTagsOnLine(lineText, i)) {
-                const location = pythonFunctionResolver_1.PythonFunctionResolver.resolveVariantAttributeLocation(tag.attrName, document.uri.fsPath);
+                const location = attributeIndex.get(tag.attrName);
                 if (location) {
                     const target = vscode.Uri.file(location.filePath).with({ fragment: `${location.line + 1}` });
                     links.push(new vscode.DocumentLink(tag.range, target));
