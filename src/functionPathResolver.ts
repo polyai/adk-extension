@@ -1,7 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
-// @ts-ignore - js-yaml types may not be available
-import * as yaml from 'js-yaml';
+import { parseDocument, LineCounter, isMap, isSeq, isScalar, Document } from 'yaml';
 
 /**
  * Pure filesystem-based resolution for Agent Studio projects: locating functions,
@@ -266,33 +265,18 @@ export class FunctionPathResolver {
 	 * Used to validate {{attr:X}} references in YAML files.
 	 */
 	static findVariantAttributeNames(filePath: string): Set<string> {
-		const names = new Set<string>();
-		const attrPath = this.findVariantAttributesPath(filePath);
-		if (!attrPath) {
-			return names;
-		}
-
-		try {
-			const config = yaml.load(fs.readFileSync(attrPath, 'utf8')) as { attributes?: Array<{ name?: string }> };
-			for (const attribute of config?.attributes ?? []) {
-				if (typeof attribute?.name === 'string') {
-					names.add(attribute.name);
-				}
-			}
-		} catch {
-			// Skip unparsable variant_attributes.yaml
-		}
-
-		return names;
+		return new Set(this.buildVariantAttributeIndex(filePath).keys());
 	}
-
-	/** Matches a `name:` key (list-item or plain mapping key), capturing its value and tolerating a trailing comment. */
-	private static readonly ATTRIBUTE_NAME_LINE_PATTERN = /^(\s*(?:-\s*)?name:\s*)(["']?)([^"'#\s]+)\2\s*(?:#.*)?$/;
 
 	/**
 	 * Builds a name -> location index for every attribute entry in config/variant_attributes.yaml,
-	 * in a single read + scan. Used instead of re-reading/re-scanning the file per {{attr:X}}
+	 * in a single read + parse. Used instead of re-reading/re-parsing the file per {{attr:X}}
 	 * reference, which would otherwise repeat O(file size) work for every tag in a document.
+	 *
+	 * Uses a real YAML parser (source-position aware) rather than a line-based heuristic, so every
+	 * valid form resolves correctly: block and flow-style sequences/maps, dash-only entries,
+	 * comments, and block scalars (whose literal text can never be mistaken for structure, since
+	 * the parser treats it as an opaque string rather than re-scanning it for "name:"-shaped text).
 	 */
 	static buildVariantAttributeIndex(
 		filePath: string
@@ -303,127 +287,53 @@ export class FunctionPathResolver {
 			return index;
 		}
 
-		const content = fs.readFileSync(attrPath, 'utf8');
-		const lines = content.split('\n');
-
-		// Only search within the `attributes:` section — `variants:` has same-shaped `- name: X` entries.
-		// Allow a trailing comment on the section header itself (e.g. `attributes: # project attributes`).
-		const attributesKeyLine = lines.findIndex(line => /^attributes:\s*(#.*)?$/.test(line));
-		if (attributesKeyLine === -1) {
-			// Not block-style YAML (e.g. a flow-style `attributes: [{name: x, ...}]`, possibly
-			// spanning multiple lines). Fall back to a loose scan so these still resolve, just
-			// without the precision of the block-style walk below.
-			this.indexFlowStyleAttributes(lines, attrPath, index);
+		let content: string;
+		try {
+			content = fs.readFileSync(attrPath, 'utf8');
+		} catch {
 			return index;
 		}
 
-		// Track the attribute list's item indent (the `- ` under `attributes:`) and each entry's
-		// key indent (the column its mapping keys start at), so we only match `name:` as a direct
-		// key of the entry's own mapping — not block-scalar body text or deeper-nested values that
-		// happen to contain the literal text "name:".
-		let itemIndent: number | null = null;
-		let entryKeyIndent: number | null = null;
-		// True right after a dash-only line (`-` alone, content on the following line(s)), until
-		// the next content line establishes that entry's key indent.
-		let awaitingEntryKeyIndent = false;
+		const lineCounter = new LineCounter();
+		let doc: Document;
+		try {
+			doc = parseDocument(content, { lineCounter });
+		} catch {
+			return index;
+		}
 
-		for (let i = attributesKeyLine + 1; i < lines.length; i++) {
-			const line = lines[i];
-			if (line.trim() === '' || /^\s*#/.test(line)) {
-				continue; // blank lines and full-line comments don't affect list structure
-			}
+		const root = doc.contents;
+		if (!isMap(root)) {
+			return index;
+		}
 
-			if (/^(\s*)-\s*$/.test(line)) {
-				// Dash-only list marker; its content (and key indent) is established by the next line.
-				const indent = line.match(/^(\s*)/)![1].length;
-				if (itemIndent === null) {
-					itemIndent = indent;
-				} else if (indent < itemIndent) {
-					break; // dedented out of the attributes list
-				}
-				entryKeyIndent = null;
-				awaitingEntryKeyIndent = true;
+		const attributesPair = root.items.find(pair => isScalar(pair.key) && pair.key.value === 'attributes');
+		const attributesNode = attributesPair?.value;
+		if (!isSeq(attributesNode)) {
+			return index;
+		}
+
+		for (const entry of attributesNode.items) {
+			if (!isMap(entry)) {
 				continue;
 			}
-
-			const dashMatch = line.match(/^(\s*)-\s+/);
-			let lineKeyIndent: number;
-
-			if (dashMatch) {
-				const indent = dashMatch[1].length;
-				if (itemIndent === null) {
-					itemIndent = indent;
-				} else if (indent < itemIndent) {
-					break; // dedented out of the attributes list
-				}
-				if (indent === itemIndent) {
-					entryKeyIndent = dashMatch[0].length; // new entry: its keys start right after "- "
-				}
-				awaitingEntryKeyIndent = false;
-				lineKeyIndent = dashMatch[0].length;
-			} else {
-				const indent = line.match(/^(\s*)/)![1].length;
-				if (indent === 0) {
-					break; // back to a top-level key — end of the attributes list
-				}
-				if (awaitingEntryKeyIndent) {
-					entryKeyIndent = indent; // first content line of a dash-only entry sets its key indent
-					awaitingEntryKeyIndent = false;
-				}
-				lineKeyIndent = indent;
+			const namePair = entry.items.find(pair => isScalar(pair.key) && pair.key.value === 'name');
+			const nameValue = namePair?.value;
+			if (!isScalar(nameValue) || typeof nameValue.value !== 'string' || !nameValue.range) {
+				continue;
 			}
-
-			if (entryKeyIndent === null || lineKeyIndent !== entryKeyIndent) {
-				continue; // not a direct key of the current entry's mapping
+			if (index.has(nameValue.value)) {
+				continue;
 			}
-
-			const match = this.ATTRIBUTE_NAME_LINE_PATTERN.exec(line);
-			if (match && !index.has(match[3])) {
-				index.set(match[3], { filePath: attrPath, line: i, character: match[1].length + match[2].length });
-			}
+			const pos = lineCounter.linePos(nameValue.range[0]);
+			index.set(nameValue.value, { filePath: attrPath, line: pos.line - 1, character: pos.col - 1 });
 		}
 
 		return index;
 	}
 
 	/**
-	 * Loose fallback for flow-style attribute definitions (e.g. `attributes: [{name: x, ...}]`),
-	 * which the block-style walk above can't parse. Scans from the `attributes:` line onward for
-	 * any `name: value` pair, without the block-style walk's indentation precision.
-	 */
-	private static indexFlowStyleAttributes(
-		lines: string[],
-		attrPath: string,
-		index: Map<string, { filePath: string; line: number; character: number }>
-	): void {
-		const attributesStart = lines.findIndex(line => /^attributes:\s*(\[|#|$)/.test(line));
-		if (attributesStart === -1) {
-			return;
-		}
-
-		const looseNamePattern = /name:\s*(["']?)([^"',}\]#\s]+)\1/g;
-
-		for (let i = attributesStart; i < lines.length; i++) {
-			const line = lines[i];
-			// A later unindented key ends the attributes section (skip the `attributes:` line itself).
-			if (i > attributesStart && /^\S/.test(line)) {
-				break;
-			}
-
-			looseNamePattern.lastIndex = 0;
-			let match: RegExpExecArray | null;
-			while ((match = looseNamePattern.exec(line)) !== null) {
-				const name = match[2];
-				if (!index.has(name)) {
-					const nameStart = match.index + match[0].indexOf(name, match[0].indexOf(':') + 1);
-					index.set(name, { filePath: attrPath, line: i, character: nameStart });
-				}
-			}
-		}
-	}
-
-	/**
-	 * Finds the `- name: attrName` entry under `attributes:` in config/variant_attributes.yaml, for navigation.
+	 * Finds the `name: attrName` entry under `attributes:` in config/variant_attributes.yaml, for navigation.
 	 * Returns the file path and 0-based line/character of the start of the attribute name.
 	 */
 	static resolveVariantAttributeLocation(

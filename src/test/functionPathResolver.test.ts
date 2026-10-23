@@ -157,6 +157,47 @@ suite('FunctionPathResolver', () => {
 			assert.ok(location);
 			assert.strictEqual(location!.line, 0);
 		});
+
+		test('resolves an inline flow-style mapping entry inside a block sequence', () => {
+			const stepFile = writeProject(
+				'attributes:\n' +
+				'  - {name: site_name, values: {voice: Example Site}}\n'
+			);
+
+			const location = FunctionPathResolver.resolveVariantAttributeLocation('site_name', stepFile);
+			assert.ok(location);
+			assert.strictEqual(location!.line, 1);
+		});
+
+		test('does not match a dash-prefixed line of literal text inside a block-scalar value', () => {
+			const stepFile = writeProject(
+				'attributes:\n' +
+				'  - name: greeting\n' +
+				'    values:\n' +
+				'      voice: |-\n' +
+				'        Some text that happens to contain\n' +
+				'        - name: site_name\n' +
+				'        as literal content.\n' +
+				'  - name: site_name\n'
+			);
+
+			const location = FunctionPathResolver.resolveVariantAttributeLocation('site_name', stepFile);
+			assert.ok(location);
+			assert.strictEqual(location!.line, 7);
+		});
+
+		test('does not let a scalar value containing "name: X" claim a later attribute in a flow-style list', () => {
+			const lineText = 'attributes: [{name: greeting, voice: "name: site_name"}, {name: site_name}]\n';
+			const stepFile = writeProject(lineText);
+
+			const location = FunctionPathResolver.resolveVariantAttributeLocation('site_name', stepFile);
+			assert.ok(location);
+			assert.strictEqual(location!.line, 0);
+			// The real "name: site_name" key is in the second {..} group; the quoted scalar
+			// containing the same literal text comes first and must not be mistaken for it.
+			const secondGroupStart = lineText.lastIndexOf('{name: site_name}');
+			assert.ok(location!.character >= secondGroupStart);
+		});
 	});
 
 	suite('buildVariantAttributeIndex', () => {

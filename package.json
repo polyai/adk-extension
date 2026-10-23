@@ -93,7 +93,8 @@
     "@joint/core": "^4.2.4",
     "@joint/layout-directed-graph": "^4.2.3",
     "@joint/layout-msagl": "^4.2.3",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",
