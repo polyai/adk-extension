@@ -1395,6 +1395,22 @@ name: "My Step"
 			);
 			assert.ok(!hasRule(diagnostics, 'invalid-function-tag'));
 		});
+
+		test('should flag a # heading inside a block scalar prompt, not treat it as a comment', () => {
+			const yaml = `
+name: "My Step"
+prompt: |-
+  ## ALWAYS CALL A FUNCTION — never respond with free-form text.
+
+  ## BANNED: {{fn:removed_function}}
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/flows/test_flow/steps/my_step.yaml',
+				{ knownGlobalFunctions: [], knownFlowFunctions: [] }
+			);
+			assert.ok(hasRule(diagnostics, 'invalid-function-tag'));
+		});
 	});
 
 	suite('invalid-attr-tag', () => {

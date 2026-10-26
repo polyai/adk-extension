@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 // @ts-ignore - js-yaml types may not be available
 import * as yaml from 'js-yaml';
+import { parseDocument, LineCounter, visit } from 'yaml';
 import { FunctionPathResolver } from '../../functionPathResolver';
 
 export interface YamlDiagnostic {
@@ -44,10 +45,34 @@ export function checkYamlFile(text: string, filePath: string, options?: YamlChec
 	}
 
 	// {{fn:X}} / {{ft:X}} / {{attr:X}} references are valid in any YAML file (steps, topics, etc.)
-	diagnostics.push(...checkFunctionTagReferences(lines, filePath, options));
-	diagnostics.push(...checkAttrTagReferences(lines, filePath, options));
+	const blockScalarLines = getBlockScalarLines(text);
+	diagnostics.push(...checkFunctionTagReferences(lines, filePath, blockScalarLines, options));
+	diagnostics.push(...checkAttrTagReferences(lines, filePath, blockScalarLines, options));
 
 	return diagnostics;
+}
+
+/**
+ * 0-based line numbers that sit inside a block scalar (e.g. `prompt: |-`), where a leading `#`
+ * is literal prompt text such as a markdown heading, not a YAML comment.
+ */
+function getBlockScalarLines(text: string): Set<number> {
+	const lineCounter = new LineCounter();
+	const doc = parseDocument(text, { lineCounter });
+	const blockLines = new Set<number>();
+	visit(doc, {
+		Scalar(_key, node) {
+			if (!node.range || (node.type !== 'BLOCK_LITERAL' && node.type !== 'BLOCK_FOLDED')) {
+				return;
+			}
+			const startLine = lineCounter.linePos(node.range[0]).line - 1;
+			const endLine = lineCounter.linePos(node.range[1] - 1).line - 1;
+			for (let line = startLine; line <= endLine; line++) {
+				blockLines.add(line);
+			}
+		},
+	});
+	return blockLines;
 }
 
 /** Matches {{fn:function_name}} (global function) and {{ft:function_name}} (flow function) references. */
@@ -69,7 +94,7 @@ function isFullLineComment(line: string): boolean {
  * {{fn:X}} must resolve to a global function file (functions/X.py), and
  * {{ft:X}} must resolve to a flow-local function file (flows/<flow>/functions/X.py).
  */
-function checkFunctionTagReferences(lines: string[], filePath: string, options?: YamlCheckOptions): YamlDiagnostic[] {
+function checkFunctionTagReferences(lines: string[], filePath: string, blockScalarLines: Set<number>, options?: YamlCheckOptions): YamlDiagnostic[] {
 	const diagnostics: YamlDiagnostic[] = [];
 
 	for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
@@ -77,7 +102,7 @@ function checkFunctionTagReferences(lines: string[], filePath: string, options?:
 		if (!line.includes('{{fn:') && !line.includes('{{ft:')) {
 			continue;
 		}
-		if (isFullLineComment(line)) {
+		if (isFullLineComment(line) && !blockScalarLines.has(lineIndex)) {
 			continue;
 		}
 
@@ -502,7 +527,7 @@ function checkChildStepExists(
  * Rule: invalid-attr-tag
  * {{attr:X}} must resolve to a `- name: X` entry under `attributes:` in config/variant_attributes.yaml.
  */
-function checkAttrTagReferences(lines: string[], filePath: string, options?: YamlCheckOptions): YamlDiagnostic[] {
+function checkAttrTagReferences(lines: string[], filePath: string, blockScalarLines: Set<number>, options?: YamlCheckOptions): YamlDiagnostic[] {
 	const diagnostics: YamlDiagnostic[] = [];
 
 	const hasAttrTag = lines.some(line => line.includes('{{attr:'));
@@ -519,7 +544,7 @@ function checkAttrTagReferences(lines: string[], filePath: string, options?: Yam
 		if (!line.includes('{{attr:')) {
 			continue;
 		}
-		if (isFullLineComment(line)) {
+		if (isFullLineComment(line) && !blockScalarLines.has(lineIndex)) {
 			continue;
 		}
 

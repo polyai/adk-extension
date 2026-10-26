@@ -5,7 +5,7 @@
 1. Open this `adk-extension` folder in VS Code (not a target agent project — the debug config lives here).
 2. Press **F5** (or Run and Debug panel → ▶ "Run Extension", if F5 is intercepted by macOS Dictation — see below).
 3. This compiles the extension and opens a separate **Extension Development Host** window with it loaded. `.vscode/launch.json` is configured to:
-   - open `agent-deployments/agents` in that window automatically, so you can expand into whichever project you want to test against (e.g. `paratha/...`)
+   - open `agent-deployments/agents` in that window automatically, so you can expand into whichever project you want to test against (e.g. `paratha/...`) — this assumes `agent-deployments` is checked out as a sibling of `adk-extension`; if yours lives elsewhere, update the path in `.vscode/launch.json`
    - disable the marketplace-installed copy of this extension (`--disable-extension=polyai.adk-extension`) in that window, so you're only ever testing your local changes, not a stale installed version shadowing them
    - run with **`noDebug: true`** by default (the "Run Extension" config) — see below for why
 4. Run `yarn watch` in a terminal to recompile on save, then **Cmd+R** in the Extension Development Host window to reload with your changes.
