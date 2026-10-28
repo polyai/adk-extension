@@ -79,7 +79,7 @@ function getBlockScalarLines(text: string): Set<number> {
 const FUNCTION_TAG_PATTERN = /\{\{(fn|ft):(\w+)\}\}/g;
 
 /** Matches {{attr:attribute_name}} references, which resolve to config/variant_attributes.yaml. */
-const ATTR_TAG_PATTERN = /\{\{attr:(\w+)\}\}/g;
+const ATTR_TAG_PATTERN = /\{\{attr:([^}]+)\}\}/g;
 
 /**
  * True if the line is entirely a YAML comment (ignoring leading whitespace).

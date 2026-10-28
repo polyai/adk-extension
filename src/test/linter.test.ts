@@ -1429,6 +1429,19 @@ content: "{{attr:site_name}}"
 			assert.ok(!hasRule(diagnostics, 'invalid-attr-tag'));
 		});
 
+		test('should not flag a hyphenated {{attr:X}} name resolving to a known attribute', () => {
+			const yaml = `
+name: "test_topic"
+content: "{{attr:site-name}}"
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/topics/test_topic.yaml',
+				{ knownAttributeNames: ['site-name'] }
+			);
+			assert.ok(!hasRule(diagnostics, 'invalid-attr-tag'));
+		});
+
 		test('should flag {{attr:X}} with no matching variant_attributes.yaml entry', () => {
 			const yaml = `
 name: "test_topic"
