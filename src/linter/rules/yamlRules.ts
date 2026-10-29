@@ -2,6 +2,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 // @ts-ignore - js-yaml types may not be available
 import * as yaml from 'js-yaml';
+import { parseDocument, LineCounter, visit } from 'yaml';
+import { FunctionPathResolver } from '../../functionPathResolver';
 
 export interface YamlDiagnostic {
 	line: number;
@@ -14,6 +16,12 @@ export interface YamlDiagnostic {
 
 export interface YamlCheckOptions {
 	childStepTargets?: string[];
+	/** Override for testing: known global function names ({{fn:X}} targets), skipping disk lookup. */
+	knownGlobalFunctions?: string[];
+	/** Override for testing: known flow-local function names ({{ft:X}} targets), skipping disk lookup. */
+	knownFlowFunctions?: string[];
+	/** Override for testing: known variant_attributes.yaml attribute names ({{attr:X}} targets), skipping disk lookup. */
+	knownAttributeNames?: string[];
 }
 
 /**
@@ -34,6 +42,98 @@ export function checkYamlFile(text: string, filePath: string, options?: YamlChec
 		diagnostics.push(...checkStepFile(lines, text, filePath, options));
 	} else if (isTopicFile(filePath)) {
 		diagnostics.push(...checkTopicFile(lines, text));
+	}
+
+	// {{fn:X}} / {{ft:X}} / {{attr:X}} references are valid in any YAML file (steps, topics, etc.)
+	const blockScalarLines = getBlockScalarLines(text);
+	diagnostics.push(...checkFunctionTagReferences(lines, filePath, blockScalarLines, options));
+	diagnostics.push(...checkAttrTagReferences(lines, filePath, blockScalarLines, options));
+
+	return diagnostics;
+}
+
+/**
+ * 0-based line numbers that sit inside a block scalar (e.g. `prompt: |-`), where a leading `#`
+ * is literal prompt text such as a markdown heading, not a YAML comment.
+ */
+function getBlockScalarLines(text: string): Set<number> {
+	const lineCounter = new LineCounter();
+	const doc = parseDocument(text, { lineCounter });
+	const blockLines = new Set<number>();
+	visit(doc, {
+		Scalar(_key, node) {
+			if (!node.range || (node.type !== 'BLOCK_LITERAL' && node.type !== 'BLOCK_FOLDED')) {
+				return;
+			}
+			const startLine = lineCounter.linePos(node.range[0]).line - 1;
+			const endLine = lineCounter.linePos(node.range[1] - 1).line - 1;
+			for (let line = startLine; line <= endLine; line++) {
+				blockLines.add(line);
+			}
+		},
+	});
+	return blockLines;
+}
+
+/** Matches {{fn:function_name}} (global function) and {{ft:function_name}} (flow function) references. */
+const FUNCTION_TAG_PATTERN = /\{\{(fn|ft):(\w+)\}\}/g;
+
+/** Matches {{attr:attribute_name}} references, which resolve to config/variant_attributes.yaml. */
+const ATTR_TAG_PATTERN = /\{\{attr:(\w+)\}\}/g;
+
+/**
+ * True if the line is entirely a YAML comment (ignoring leading whitespace).
+ * Used to skip commented-out {{fn:}}/{{ft:}}/{{attr:}} references, which aren't live config.
+ */
+function isFullLineComment(line: string): boolean {
+	return line.trim().startsWith('#');
+}
+
+/**
+ * Rule: invalid-function-tag
+ * {{fn:X}} must resolve to a global function file (functions/X.py), and
+ * {{ft:X}} must resolve to a flow-local function file (flows/<flow>/functions/X.py).
+ */
+function checkFunctionTagReferences(lines: string[], filePath: string, blockScalarLines: Set<number>, options?: YamlCheckOptions): YamlDiagnostic[] {
+	const diagnostics: YamlDiagnostic[] = [];
+
+	for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+		const line = lines[lineIndex];
+		if (!line.includes('{{fn:') && !line.includes('{{ft:')) {
+			continue;
+		}
+		if (isFullLineComment(line) && !blockScalarLines.has(lineIndex)) {
+			continue;
+		}
+
+		FUNCTION_TAG_PATTERN.lastIndex = 0;
+		let match: RegExpExecArray | null;
+		while ((match = FUNCTION_TAG_PATTERN.exec(line)) !== null) {
+			const kind = match[1] as 'fn' | 'ft';
+			const functionName = match[2];
+
+			const resolved = kind === 'fn'
+				? (options?.knownGlobalFunctions
+					? options.knownGlobalFunctions.includes(functionName)
+					: FunctionPathResolver.resolveConvFunctionPath(functionName, filePath) !== null)
+				: (options?.knownFlowFunctions
+					? options.knownFlowFunctions.includes(functionName)
+					: FunctionPathResolver.resolveFlowFunctionPath(functionName, filePath) !== null);
+
+			if (!resolved) {
+				const expectedLocation = kind === 'fn'
+					? 'functions/'
+					: 'flows/<flow_name>/functions/';
+				diagnostics.push({
+					line: lineIndex,
+					startChar: match.index,
+					endChar: match.index + match[0].length,
+					message: `{{${kind}:${functionName}}} does not resolve to a function. Expected a file at ${expectedLocation}${functionName}.py.`,
+					severity: 'error',
+					code: 'invalid-function-tag'
+				});
+			}
+		}
 	}
 
 	return diagnostics;
@@ -417,6 +517,51 @@ function checkChildStepExists(
 				severity: 'error',
 				code: 'invalid-child-step'
 			});
+		}
+	}
+
+	return diagnostics;
+}
+
+/**
+ * Rule: invalid-attr-tag
+ * {{attr:X}} must resolve to a `- name: X` entry under `attributes:` in config/variant_attributes.yaml.
+ */
+function checkAttrTagReferences(lines: string[], filePath: string, blockScalarLines: Set<number>, options?: YamlCheckOptions): YamlDiagnostic[] {
+	const diagnostics: YamlDiagnostic[] = [];
+
+	const hasAttrTag = lines.some(line => line.includes('{{attr:'));
+	if (!hasAttrTag) {
+		return diagnostics;
+	}
+
+	const attributeNames = options?.knownAttributeNames
+		? new Set(options.knownAttributeNames)
+		: FunctionPathResolver.findVariantAttributeNames(filePath);
+
+	for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+		const line = lines[lineIndex];
+		if (!line.includes('{{attr:')) {
+			continue;
+		}
+		if (isFullLineComment(line) && !blockScalarLines.has(lineIndex)) {
+			continue;
+		}
+
+		ATTR_TAG_PATTERN.lastIndex = 0;
+		let match: RegExpExecArray | null;
+		while ((match = ATTR_TAG_PATTERN.exec(line)) !== null) {
+			const attrName = match[1];
+			if (!attributeNames.has(attrName)) {
+				diagnostics.push({
+					line: lineIndex,
+					startChar: match.index,
+					endChar: match.index + match[0].length,
+					message: `{{attr:${attrName}}} does not resolve to an attribute in config/variant_attributes.yaml.`,
+					severity: 'error',
+					code: 'invalid-attr-tag'
+				});
+			}
 		}
 	}
 

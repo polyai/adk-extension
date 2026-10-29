@@ -9,8 +9,25 @@
 			"name": "Run Extension",
 			"type": "extensionHost",
 			"request": "launch",
+			"noDebug": true,
 			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}"
+				"--disable-extension=polyai.adk-extension",
+				"--extensionDevelopmentPath=${workspaceFolder}",
+				"${workspaceFolder}/../agent-deployments/agents"
+			],
+			"outFiles": [
+				"${workspaceFolder}/dist/**/*.js"
+			],
+			"preLaunchTask": "${defaultBuildTask}"
+		},
+		{
+			"name": "Run Extension (with debugging)",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": [
+				"--disable-extension=polyai.adk-extension",
+				"--extensionDevelopmentPath=${workspaceFolder}",
+				"${workspaceFolder}/../agent-deployments/agents"
 			],
 			"outFiles": [
 				"${workspaceFolder}/dist/**/*.js"

@@ -1309,6 +1309,167 @@ key: value
 			assert.strictEqual(diagnostics.length, 0);
 		});
 	});
+
+	suite('invalid-function-tag', () => {
+		const knownGlobalFunctions = ['handoff', 'create_lead'];
+		const knownFlowFunctions = ['late_arrival_to_book'];
+
+		test('should not flag {{fn:X}} resolving to a known global function', () => {
+			const yaml = `
+name: "My Step"
+prompt: "Call {{fn:handoff}} to transfer the caller."
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/flows/test_flow/steps/my_step.yaml',
+				{ knownGlobalFunctions, knownFlowFunctions }
+			);
+			assert.ok(!hasRule(diagnostics, 'invalid-function-tag'));
+		});
+
+		test('should not flag {{ft:X}} resolving to a known flow function', () => {
+			const yaml = `
+name: "My Step"
+prompt: "Call {{ft:late_arrival_to_book}} if they confirm."
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/flows/test_flow/steps/my_step.yaml',
+				{ knownGlobalFunctions, knownFlowFunctions }
+			);
+			assert.ok(!hasRule(diagnostics, 'invalid-function-tag'));
+		});
+
+		test('should flag {{fn:X}} with no matching global function', () => {
+			const yaml = `
+name: "My Step"
+prompt: "Call {{fn:does_not_exist}} immediately."
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/flows/test_flow/steps/my_step.yaml',
+				{ knownGlobalFunctions, knownFlowFunctions }
+			);
+			const matches = findByCode(diagnostics, 'invalid-function-tag');
+			assert.strictEqual(matches.length, 1);
+			assert.ok(matches[0].message.includes('does_not_exist'));
+		});
+
+		test('should flag {{ft:X}} with no matching flow function', () => {
+			const yaml = `
+name: "My Step"
+prompt: "Call {{ft:also_missing}} immediately."
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/flows/test_flow/steps/my_step.yaml',
+				{ knownGlobalFunctions, knownFlowFunctions }
+			);
+			const matches = findByCode(diagnostics, 'invalid-function-tag');
+			assert.strictEqual(matches.length, 1);
+			assert.ok(matches[0].message.includes('also_missing'));
+		});
+
+		test('should flag references in topic files too, not just steps', () => {
+			const yaml = `
+name: "test_topic"
+actions: "Call {{fn:unknown_fn}} to transfer."
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/topics/test_topic.yaml',
+				{ knownGlobalFunctions: [] }
+			);
+			assert.ok(hasRule(diagnostics, 'invalid-function-tag'));
+		});
+
+		test('should not flag an unresolved reference inside a commented-out line', () => {
+			const yaml = `
+name: "My Step"
+# prompt: "Call {{fn:old_function}}"
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/flows/test_flow/steps/my_step.yaml',
+				{ knownGlobalFunctions: [], knownFlowFunctions: [] }
+			);
+			assert.ok(!hasRule(diagnostics, 'invalid-function-tag'));
+		});
+
+		test('should flag a # heading inside a block scalar prompt, not treat it as a comment', () => {
+			const yaml = `
+name: "My Step"
+prompt: |-
+  ## ALWAYS CALL A FUNCTION — never respond with free-form text.
+
+  ## BANNED: {{fn:removed_function}}
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/flows/test_flow/steps/my_step.yaml',
+				{ knownGlobalFunctions: [], knownFlowFunctions: [] }
+			);
+			assert.ok(hasRule(diagnostics, 'invalid-function-tag'));
+		});
+	});
+
+	suite('invalid-attr-tag', () => {
+		const knownAttributeNames = ['site_name', 'style_prompt'];
+
+		test('should not flag {{attr:X}} resolving to a known attribute', () => {
+			const yaml = `
+name: "test_topic"
+content: "{{attr:site_name}}"
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/topics/test_topic.yaml',
+				{ knownAttributeNames }
+			);
+			assert.ok(!hasRule(diagnostics, 'invalid-attr-tag'));
+		});
+
+		test('should flag {{attr:X}} with no matching variant_attributes.yaml entry', () => {
+			const yaml = `
+name: "test_topic"
+content: "{{attr:no_such_attribute}}"
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/topics/test_topic.yaml',
+				{ knownAttributeNames }
+			);
+			const matches = findByCode(diagnostics, 'invalid-attr-tag');
+			assert.strictEqual(matches.length, 1);
+			assert.ok(matches[0].message.includes('no_such_attribute'));
+		});
+
+		test('should not scan for attr tags when none are present', () => {
+			const yaml = `
+name: "My Step"
+prompt: "Call {{fn:handoff}}."
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/flows/test_flow/steps/my_step.yaml',
+				{ knownGlobalFunctions: ['handoff'], knownAttributeNames: [] }
+			);
+			assert.ok(!hasRule(diagnostics, 'invalid-attr-tag'));
+		});
+
+		test('should not flag an unresolved reference inside a commented-out line', () => {
+			const yaml = `
+name: "test_topic"
+# {{attr:removed_attribute}}
+`;
+			const diagnostics = checkYamlFile(
+				yaml,
+				'/project/topics/test_topic.yaml',
+				{ knownAttributeNames: [] }
+			);
+			assert.ok(!hasRule(diagnostics, 'invalid-attr-tag'));
+		});
+	});
 });
 
 suite('Linter Config', () => {

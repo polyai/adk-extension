@@ -9,6 +9,7 @@ import { FlowParser } from './flowParser';
 import { getWebviewContent, getErrorWebviewContent } from './webview/webviewContent';
 import { WebviewMessageHandler } from './webview/webviewHandlers';
 import { PythonDefinitionProvider, PythonHoverProvider, PythonReferencesProvider, PythonCompletionProvider, PythonFunctionLinkProvider } from './pythonLanguageFeatures';
+import { YamlFunctionLinkProvider, YamlFunctionHoverProvider, YamlAttrLinkProvider, YamlAttrHoverProvider } from './yamlLanguageFeatures';
 import { initializeDebug, toggleDebugMode, debugLog } from './utils/debug';
 import { AgentStudioLinter } from './linter';
 
@@ -257,6 +258,29 @@ conditions: []
 	);
 	debugLog('Python language features registered');
 
+	// Register YAML language features for {{fn:X}} / {{ft:X}} / {{attr:X}} resolution
+	debugLog('Registering YAML language features...');
+	const yamlFunctionLinkProvider = vscode.languages.registerDocumentLinkProvider(
+		{ language: 'yaml', scheme: 'file' },
+		new YamlFunctionLinkProvider()
+	);
+
+	const yamlFunctionHoverProvider = vscode.languages.registerHoverProvider(
+		{ language: 'yaml', scheme: 'file' },
+		new YamlFunctionHoverProvider()
+	);
+
+	const yamlAttrLinkProvider = vscode.languages.registerDocumentLinkProvider(
+		{ language: 'yaml', scheme: 'file' },
+		new YamlAttrLinkProvider()
+	);
+
+	const yamlAttrHoverProvider = vscode.languages.registerHoverProvider(
+		{ language: 'yaml', scheme: 'file' },
+		new YamlAttrHoverProvider()
+	);
+	debugLog('YAML language features registered');
+
 	// Initialize and activate the Agent Studio Linter
 	debugLog('Activating Agent Studio Linter...');
 	const linter = new AgentStudioLinter();
@@ -271,7 +295,11 @@ conditions: []
 		pythonHoverProvider,
 		pythonReferencesProvider,
 		pythonCompletionProvider,
-		pythonFunctionLinkProvider
+		pythonFunctionLinkProvider,
+		yamlFunctionLinkProvider,
+		yamlFunctionHoverProvider,
+		yamlAttrLinkProvider,
+		yamlAttrHoverProvider
 	);
 }
 
