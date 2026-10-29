@@ -5,7 +5,7 @@ import { PythonFunctionResolver } from './pythonFunctionResolver';
 const FUNCTION_TAG_PATTERN = /\{\{(fn|ft):(\w+)\}\}/g;
 
 /** Matches {{attr:attribute_name}} references, which resolve to config/variant_attributes.yaml. */
-const ATTR_TAG_PATTERN = /\{\{attr:([^}]+)\}\}/g;
+const ATTR_TAG_PATTERN = /\{\{attr:(\w+)\}\}/g;
 
 type FunctionTagMatch = { kind: 'fn' | 'ft'; functionName: string; range: vscode.Range };
 

@@ -16259,7 +16259,7 @@ const pythonFunctionResolver_1 = __webpack_require__(34);
 /** Matches {{fn:function_name}} (global function) and {{ft:function_name}} (flow function) references. */
 const FUNCTION_TAG_PATTERN = /\{\{(fn|ft):(\w+)\}\}/g;
 /** Matches {{attr:attribute_name}} references, which resolve to config/variant_attributes.yaml. */
-const ATTR_TAG_PATTERN = /\{\{attr:([^}]+)\}\}/g;
+const ATTR_TAG_PATTERN = /\{\{attr:(\w+)\}\}/g;
 /**
  * Finds all {{fn:X}} / {{ft:X}} references on a single line.
  */
@@ -17693,7 +17693,7 @@ function getBlockScalarLines(text) {
 /** Matches {{fn:function_name}} (global function) and {{ft:function_name}} (flow function) references. */
 const FUNCTION_TAG_PATTERN = /\{\{(fn|ft):(\w+)\}\}/g;
 /** Matches {{attr:attribute_name}} references, which resolve to config/variant_attributes.yaml. */
-const ATTR_TAG_PATTERN = /\{\{attr:([^}]+)\}\}/g;
+const ATTR_TAG_PATTERN = /\{\{attr:(\w+)\}\}/g;
 /**
  * True if the line is entirely a YAML comment (ignoring leading whitespace).
  * Used to skip commented-out {{fn:}}/{{ft:}}/{{attr:}} references, which aren't live config.
